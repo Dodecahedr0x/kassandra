@@ -18,6 +18,15 @@
 //! behavior, not just source reading.
 //!
 //! See `docs/plans/2026-06-29-challenge-rework-recon.md`.
+//!
+//! KEPT after C3 (deliberately, not folded in): this is the ONLY coverage of
+//! `remove_liquidity` against the real AMM binary, and it pins the IMPERMANENT-
+//! LOSS finding that MOTIVATED the escrow/idle-bond design — the bond is split
+//! into idle conditional KASS and redeemed (winning side 1:1) rather than LP'd,
+//! so it round-trips cleanly. That idle-bond path is now driven end-to-end by
+//! `challenge_e2e.rs` (real open → AMM → settle, both outcomes) +
+//! `settle_challenge.rs`; this file remains the empirical "why not LP the bond"
+//! record and the lone real-binary `remove_liquidity` check.
 
 mod common;
 use common::*;

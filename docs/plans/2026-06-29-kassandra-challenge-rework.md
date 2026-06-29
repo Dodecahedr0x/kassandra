@@ -227,3 +227,108 @@ checked, den==0 → InvalidConfig).
   before-window / double-settle / AMM-binding-attack / aliased-AMM / last-block-
   swap / uncranked-pass tests intact. All driven against the REAL v0.4 AMM +
   conditional_vault binaries in LiteSVM.
+
+---
+
+## C3 delta log — e2e challenge lifecycle (real AMM, both outcomes) + conservation fuzz (DONE)
+
+All TEST work; NO production change (no genuine bug surfaced — see below).
+
+### `tests/challenge_e2e.rs` — full-lifecycle e2e, BOTH outcomes
+- **`e2e_honest_full_lifecycle_survives`** + **`e2e_fraud_full_lifecycle_swap_driven_disqualifies`**.
+- **Real vs seeded split (honest):**
+  - **Dispute core (front door) is REAL** — `front_door_to_challenge` drives
+    `create_oracle → propose×2 (conflict) → finalize_proposals → submit_fact →
+    advance_phase → vote_fact → finalize_facts → submit_ai_claim×2 →
+    finalize_ai_claims` to land `Phase::Challenge` with a real `AiClaim` for a
+    surviving, UN-slashed proposer (option-0 proposer claims option 0 → no flip).
+    NO `set_phase` shortcut in the e2e tests; only `warp`/`warp_slots` move time.
+  - **MetaDAO market + AMMs are REAL** — composed via real CPIs; `open_challenge`
+    verifies/records them, escrows the challenger USDC (sized by `kass_price`),
+    and program-signs the bond split.
+  - **`open_challenge → settle_challenge` is REAL** — `resolve_question` +
+    `redeem_tokens` + directional-fee transfers, all program-signed real CPIs
+    against the deployed v0.4 binaries.
+  - **TWAP is REAL and SWAP-DRIVEN on the fraud path** — the fail pool's price is
+    moved by a genuine `swap` (BUY) and accumulated into the slot-weighted TWAP
+    across TWO `crank_that_twap` calls 300 slots apart (TWAP ≈ (1e9 + ~3.5e9)/2 ≫
+    pass·1.1), so the disqualify decision is driven by real trading, not a seeded
+    price. (Single-crank cannot move the TWAP — the aggregator weights the
+    pre-swap observation over the whole window; the 2-crank accumulation with
+    fixed 300-slot warps is the deterministic way to make a swap load-bearing,
+    sidestepping the brittleness the `settle_challenge.rs` NOTE flags.) Honest
+    path leaves both pools neutral (pass == fail → survive).
+- **Conservation vs an INDEPENDENT reference** — `ConservationModel` predicts
+  every post-settle token delta from `bond` + escrow + the fee config ALONE
+  (never reads the program's accounting). Both equations asserted:
+  - KASS: `stake_vault + kass_vault_underlying + challenger_kass == total_oracle_stake`
+    (the kass_fee carve-out left to the challenger on disqualify; on survive
+    `challenger_kass == 0` → the idle-bond conservation).
+  - USDC: `proposer_usdc + challenger_usdc_dest == escrow`, exactly.
+  Plus redeem-drained holders, `slashed_amount`/`bond_pool` identity, and the
+  question resolution (`[1,0]` survive / `[0,1]` disqualify).
+
+### Conservation FUZZ — `challenge_conservation_fuzz` (24 cases)
+- Sweeps `bond` × `pass_twap`/`fail_twap` (incl. `pass_twap==0` → always survive)
+  × fuzzed directional fee rates (num ≤ den), driving the REAL `open_challenge`
+  (split + escrow) + `settle_challenge` (redeem + directional fees) and asserting
+  BOTH conservation equations + the slash outcome against the same independent
+  `ConservationModel` + an independent `ref_disqualify` slash rule.
+- **TWAP is STUBBED here (documented):** the pass/fail AMMs are FABRICATED
+  AMM-program-owned accounts carrying a chosen aggregator, so
+  `verify_and_read_twap` reads a known TWAP cheaply. The real-AMM *TWAP
+  production* path is covered by the two e2e tests + `settle_challenge.rs`; the
+  fuzz targets the fee/conservation ACCOUNTING across both outcomes. Case count
+  kept at 24 (each case rebuilds LiteSVM + loads both MetaDAO binaries + composes
+  real vaults + real open/settle ≈ 7 txs) to stay fast (~2.5s) and non-flaky.
+
+### Donation edge (C2 review heads-up) — handled, NO production change
+- **`donation_into_holder_inflates_stake_vault_not_theft`**: a third party
+  `split_tokens` D KASS in this market's KASS vault and SPL-transfers the D
+  pass-KASS into the oracle-PDA-owned `oracle_pass_kass` holder before settle.
+  `redeem_tokens` burns the FULL holder balance (bond + D) → pulls bond + D
+  underlying into `stake_vault`. The test asserts `stake_vault + underlying ==
+  total_oracle_stake + D` — i.e. the donation ONLY INFLATES `stake_vault`; the
+  donor forfeits their own KASS (their fail-KASS is worthless) and NO protocol
+  funds leave to them. It is external griefing that ADDS KASS to the protocol,
+  not theft, so production is intentionally NOT guarded (a guard would reject a
+  donor gifting the protocol KASS). Judged NOT a vulnerability → no STOP needed.
+
+### Recon test reconciliation
+- **KEPT `tests/recon_lp_resolution.rs`** (with a reconciliation note in its
+  header): it is the ONLY real-binary `remove_liquidity` coverage and pins the
+  impermanent-loss finding that motivated the escrow/idle-bond model now driven
+  end-to-end by `challenge_e2e.rs` + `settle_challenge.rs`.
+
+### Build/test
+- `just build` + full `cargo test -p kassandra-program` green; `cargo clippy
+  --all-targets` clean; `cargo fmt` applied.
+
+---
+
+## Challenge rework: COVERED vs DEFERRED
+
+**Covered (driven against the REAL deployed v0.4 amm + conditional_vault binaries):**
+- C1 — challenger USDC escrow sized by `kass_price`, governable challenge fees,
+  set_config bounds (`open_challenge.rs`, `set_config.rs`).
+- C2 — physical `redeem_tokens` + directional fees (USDC→proposer on survive,
+  KASS→challenger on disqualify) + the slashed_amount/bond_pool carve-out
+  identity, both outcomes (`settle_challenge.rs`).
+- C3 — full e2e lifecycle BOTH outcomes via real front door → real open → real
+  AMM (swap-driven fraud TWAP) → real settle; KASS+USDC conservation vs an
+  independent reference; conservation fuzz; donation edge documented
+  (`challenge_e2e.rs`). Real-binary `remove_liquidity`/IL pin
+  (`recon_lp_resolution.rs`).
+- TWAP slash trigger: hand-enumerated outcome cases incl. AMM-binding attack,
+  aliased pools, last-block-swap manipulation resistance, uncranked-pass survive,
+  flip→disqualify no-underflow (`settle_challenge.rs`).
+
+**Deferred (out of scope, documented at the call sites / in the plan):**
+- Staker settlement (per-staker claim/return/reward, emissions) — the challenger
+  KASS-fee / proposer USDC-fee land in plain token accounts where that milestone's
+  claim model will pick them up.
+- Multi-crank "spike dilutes over a long window" TWAP test — brittle under LiteSVM
+  slot accounting; the realistic last-block attack is covered deterministically.
+- Donation griefing guard — judged a non-vulnerability (donor-funded inflation,
+  not theft); intentionally no production guard.
+- Migrating challenge markets off v0.4 (kept on v0.4 for the built-in TWAP).
