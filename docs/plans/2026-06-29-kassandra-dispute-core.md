@@ -39,6 +39,8 @@ The code snippets in tasks below are the original draft. As of Task 4, the live 
 - **KassandraError discriminants (append-only):** NotImplemented=0, WrongPhase=1, WindowClosed=2, WindowNotElapsed=3, Unauthorized=4, InvalidAccount=5, DuplicateFact=6, ZeroStake=7.
 - **Harness** (`tests/common/mod.rs`): `seed_disputed_oracle`, `seed_program_account`, `fund_kass`, `set_phase`, `send` (rotates blockhash), `warp` (advances `unix_timestamp`, +1 slot only — a `warp_slots` variant is still needed for the TWAP tasks 11-12), accessors via `pod_read_unaligned`, public `oracle_pda`/`proposer_pda`.
 - **Known deferred:** pre-funded-PDA griefing on fact creation (Allocate+Assign is the future fix); `stake == 0` facts are rejected (`ZeroStake`).
+- **Quorum rule RESOLVED (affects Task 6):** the fact-approval denominator is a NEW fixed `Oracle.dispute_bond_total: u64` field (= sum of proposer bonds, set when the dispute starts; the harness seeds it = Σ bonds). A fact is agreed iff `approve_stake > duplicate_stake` AND `approve_stake * THRESHOLD_DEN >= dispute_bond_total * THRESHOLD_NUM`. Do NOT use `total_oracle_stake` as the denominator (it grows with vote stakes → dilution + griefing). `total_oracle_stake` remains the conservation accumulator (== vault balance). Task 6 must add this field (re-pinning ABI sizes) and the harness must set it.
+- **As of Task 5:** `Ix::AdvancePhase=7`; `KassandraError::DuplicateVote=8`; FactVote PDA seeds `[b"vote", fact, voter]`; `config::PHASE_WINDOW: i64 = 3600`; guard `load_fact`.
 
 ---
 

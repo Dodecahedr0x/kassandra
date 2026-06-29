@@ -106,9 +106,14 @@ rules are **not** facts — they are fixed at creation.
 ### Fact Voting window (set frozen)
 
 - Per-fact **approval voting** by stake. A vote can be **approve** or **duplicate**.
-- **Quorum denominator = total KASS stake associated with the oracle.** A fact joins the
-  **agreed set** when its approval stake ≥ `threshold × total-oracle-stake` (threshold
-  configurable per oracle; default supermajority).
+- **Quorum denominator = the dispute's fixed bond weight** (`dispute_bond_total` = sum of
+  proposer bonds, locked when the dispute starts). A fact joins the **agreed set** iff
+  `approve_stake > duplicate_stake` AND `approve_stake ≥ threshold × dispute_bond_total`
+  (threshold a protocol-global config; default supermajority 2/3). The denominator is the
+  bond weight rather than `total_oracle_stake` because the latter grows with every escrowed
+  fact/vote stake — under non-exclusive voting that would dilute every fact below threshold
+  and hand a risk-free griefing vector to large `duplicate` votes. The fixed bond weight is
+  stable, vote-independent, and means "approval comparable to the disputed stake."
 - **Non-exclusive approval:** a staker's stake is not split — one staker may approve all
   facts, and full stake counts toward each approved fact.
 - **Open participation:** any external KASS holder may stake to weigh in (deepens the
@@ -249,8 +254,10 @@ authority that can resolve **Invalid dead-end** oracles — ideally via **MetaDA
 4. **Stake locking:** locked-in proposer bonds cannot be withdrawn during dispute.
 5. **Fee monotonicity:** creation fee moves only as a function of the creation-rate EMA;
    never negative; 0 at genesis.
-6. **Quorum correctness:** a fact is agreed iff approval stake ≥ threshold × total-oracle-
-   stake; duplicate-dominant facts are excluded and their stakers unslashed.
+6. **Quorum correctness:** a fact is agreed iff `approve_stake > duplicate_stake` AND
+   `approve_stake ≥ threshold × dispute_bond_total` (the fixed dispute bond weight, NOT the
+   vote-inflated `total_oracle_stake`); duplicate-dominant facts are excluded and their
+   stakers unslashed.
 7. **Plurality correctness:** resolution = plurality over surviving proposers; ties →
    Invalid dead-end.
 8. **Slash trigger correctness:** a claim is disqualified iff `fail_TWAP > pass_TWAP +
