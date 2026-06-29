@@ -12,6 +12,8 @@ use pinocchio::entrypoint;
 #[cfg(not(feature = "no-entrypoint"))]
 entrypoint!(process_instruction);
 
+pub mod state;
+
 pub const ID: Pubkey = pinocchio_pubkey::pubkey!("KassVxvXUEPr5apSr2MqiGva4VFtJXyYLLDFS3f83nY");
 
 pub fn process_instruction(
