@@ -78,3 +78,43 @@ Drive a governance proposal carrying a `set_config` (or `resolve_deadend`) CPI t
 
 ## Execution note
 After each task: `just build` → `cargo test -p kassandra-program` → clippy/fmt, confirm green, commit. Never proceed on a red bar. Keep an "Implementation deltas (F0–F6)" running log appended here. F0 is the highest risk (resolve real v0.6/Meteora IDs + layouts first); F2 is the largest churn; F6 is the hardest test (with the documented seam fallback).
+
+---
+
+## Implementation deltas (F0–F6) — live state
+
+### F0 — MetaDAO v0.6 + Meteora DAMM v2 recon + CPI groundwork (DONE 2026-06-29)
+
+**Environment.** solana-cli 3.1.7 (Agave), cargo 1.94.1; mainnet-beta reachable (`solana cluster-version -u m` → 4.0.3). Step 0 UNBLOCKED.
+
+**Resolved program IDs (authoritatively sourced, verified on-chain mainnet-beta 2026-06-29):**
+
+| program | id | version / source |
+|---|---|---|
+| futarchy (v0.6 governance, replaces `autocrat`) | `FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq` | v0.6.0 — `declare_id!` in `metaDAOproject/programs` `programs/futarchy/src/lib.rs` @ tag `v0.6.0` + `Anchor.toml [programs.localnet].futarchy`; Cargo `version = "0.6.0"`. On-chain: slot 423005106, 1243500 bytes, upgrade auth `6awyHMsh…` (same MetaDAO authority as v0.4). |
+| conditional_vault (v0.6 line) | `VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg` | UNCHANGED from v0.4 — `declare_id!` @ `v0.6.0` identical to v0.4. On-chain: slot 399213625, 424952 bytes. Split/merge/redeem + init/resolve_question discriminators are byte-for-byte the v0.4 ones (re-verified). |
+| Meteora DAMM v2 (cp-amm) | `cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG` | `declare_id!` in `MeteoraAg/damm-v2` `programs/cp-amm/src/lib.rs` @ main; cross-confirmed as mainnet deployment in `MeteoraAg/damm-v2-sdk`. MetaDAO's `programs/damm_v2_cpi` shim (v0.6 tree) `declare_id!`s the same address. On-chain: slot 428936648, 2174352 bytes, upgrade auth `JADaUV8k…` (Meteora's). |
+| Squads v4 (DAO execution-authority host) | `SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf` | `declare_id!` in `Squads-Protocol/v4` @ rev `6d5235da621a2e9b7379ea358e48760e981053be` (the rev `futarchy/Cargo.toml` pins). Seeds from `state/seeds.rs`. |
+
+**Two recon findings that REVISE the design:**
+1. **DAO execution authority = a Squads v4 multisig vault, NOT a futarchy PDA.** `initialize_dao` CPIs into Squads to create a multisig whose `create_key` is the `Dao` PDA; a passed proposal carries a `squads_proposal` and executes through the Squads **vault** PDA. So `Protocol.dao_authority` (signer of `set_config`/`resolve_deadend`, F1/F3/F4/F6) is the Squads vault PDA. Seeds (under `SQDS4…`): multisig `[b"multisig", b"multisig", dao]`; vault `[b"multisig", multisig, b"vault", [0u8]]`. DAO PDA (under futarchy) `[b"dao", dao_creator, nonce_le8]`. Proposal PDA `[b"proposal", squads_proposal]`.
+2. **Meteora cp-amm has NO TWAP oracle.** Its zero-copy `Pool` exposes only an INSTANTANEOUS `sqrt_price: u128` (Q64.64) + cumulative *fee* accumulators — no cumulative price observation. The manipulation-resistant KASS/USDC TWAP the design's `kass_price` (F5) needs is the futarchy program's **embedded** `FutarchyAmm` spot-pool `TwapOracle` (`Dao.amm`), not Meteora. **F5 should read the futarchy spot TWAP**, not a Meteora pool. The `kass_usdc_pool`/`kass_price` design language should be re-read as "the futarchy DAO's embedded spot market".
+
+**Layouts documented (from v0.6 / Meteora / Squads source, in `src/cpi/metadao_v06.rs`):**
+- **Futarchy spot TWAP (the real F5 source)** — the spot `Pool` is the first payload element of both `PoolState` variants, so its offsets are FIXED regardless of variant: in a `Dao` account, byte 8 = PoolState tag (0=Spot,1=Futarchy), byte 9 = spot `Pool`/`TwapOracle` start: aggregator u128@9, last_updated_timestamp i64@25, created_at_timestamp i64@33, last_price u128@41, last_observation u128@57, max_observation_change_per_update u128@73, initial_observation u128@89, start_delay_seconds u32@105. `get_twap = aggregator / (last_updated_ts − (created_at_ts + start_delay_seconds))`, price scaled ×1e12. Implemented + validated as `futarchy_spot_twap`.
+- **`Dao` account** — field order documented; CAUTION `amm.state` is a Borsh enum (Spot=1+132, Futarchy=1+3×132 bytes) so ALL fields after it (`squads_multisig_vault`, mints, params…) are at VARIABLE offsets. F1 must store the vault key in `Protocol` at bootstrap rather than re-derive from `Dao` bytes.
+- **`Proposal` account** — `number` u32@8, `proposer` Pubkey@12, `timestamp_enqueued` i64@44, `state` enum tag@52 (0=Draft{+8},1=Pending,2=Passed,3=Failed); fields after `state` are variable-offset.
+- **Meteora cp-amm `Pool`** — full field ORDER documented; the load-bearing field is `sqrt_price: u128`. Exact byte offset NOT hand-pinned (nested zero-copy `PoolFeesStruct` C-padding is error-prone by hand); deferred to F5 to pin against a LIVE pool dump / published IDL IF F5 ends up reading Meteora at all (it likely won't — finding #2).
+
+**Discriminators (computed `sha256("global:<name>")[..8]` / `account:<Type>`, in the module):** futarchy initialize_dao/initialize_proposal/launch_proposal/finalize_proposal/update_dao/spot_swap/conditional_swap; account Dao/Proposal; Meteora initialize_pool/swap/add_liquidity + account Pool. Vault discs reused from `cpi::metadao` (unchanged).
+
+**Files (all additive; v0.4 integration untouched):**
+- `scripts/fetch-metadao-v06.sh` — documents IDs/versions/sources/slots + sha256 pins; dumps `metadao_futarchy_v06.so` (1243500 B), `metadao_conditional_vault_v06.so` (424952 B), `meteora_damm_v2.so` (2174352 B) into `programs/kassandra/tests/fixtures/`.
+- `programs/kassandra/src/cpi/metadao_v06.rs` (+ `pub mod metadao_v06;`) — IDs, discriminators, PDA seed builders + derivation, the `futarchy_spot_twap` reader, no-alloc arg encoders (`initialize_dao_data_no_limit` for the `None` spending-limit case; complex/variable-length params STUBBED + documented), invoke wrappers.
+- `programs/kassandra/tests/metadao_v06_cpi.rs` — 5 tests, all green.
+
+**Validated vs deferred:**
+- VALIDATED against real binaries: all 3 fixtures load + executable; a FULL conditional_vault split (initialize_question → initialize_conditional_vault → split_tokens) against the v0.6-dumped vault binary; the COMPUTED futarchy `initialize_dao` discriminator dispatches into the real futarchy binary's `InitializeDao` handler (asserted via the `Instruction: InitializeDao` program log) while a bogus discriminator does not; the futarchy spot-TWAP offset map + `get_twap` math against a hand-built `Dao` blob.
+- DEFERRED to F5/F6: a full `initialize_dao` success (needs Squads v4 program + mints loaded), driving a proposal to pass/execute, and reading a live Meteora cp-amm `sqrt_price` (cp-amm has no TWAP — see finding #2).
+
+Build: `just build` (SBF) clean. Tests: `cargo test -p kassandra-program` all pass (incl. the 5 new). `cargo clippy --all-targets` clean; `cargo fmt` applied.

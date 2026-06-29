@@ -10,3 +10,4 @@
 //! account orderings verified against the real on-chain binaries.
 
 pub mod metadao;
+pub mod metadao_v06;
