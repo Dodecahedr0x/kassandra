@@ -1,0 +1,139 @@
+//! `finalize_ai_claims`: settle the AI-claim round once its window has elapsed.
+//!
+//! Performs NO token CPI: like `finalize_facts`, it only mutates account data
+//! and bumps the `Oracle.bond_pool` accounting counter. The escrowed KASS does
+//! not move here.
+//!
+//! # Incremental finalization
+//! Mirrors `finalize_facts`: each call processes ANY non-empty subset of the
+//! not-yet-ai-finalized proposers, bumping `Oracle.ai_finalized_count`. The
+//! phase only advances to [`Phase::Challenge`] once the WHOLE proposer set has
+//! been processed (`ai_finalized_count == proposer_count`), so an arbitrarily
+//! large set can be finalized in chunks across many txs.
+//!
+//! # Slash rules (design §5, §7)
+//! For each proposer in the tail (gated to [`Phase::AiClaim`], after the window):
+//! * **Already disqualified** (defensive — does not occur in the normal flow
+//!   before AiClaim): not slashed again, just marked ai-finalized and counted.
+//!   It is already excluded from `surviving_count`.
+//! * **No-show** (`claim_option == CLAIM_OPTION_NONE`): FULL slash — abandoning
+//!   mid-dispute. `slashed=1`, `disqualified=1`, `bond_pool += bond`,
+//!   `surviving_count -= 1`.
+//! * **Flipped** (`is_flipped()`): PARTIAL slash of `bond * FLIP_SLASH_NUM /
+//!   FLIP_SLASH_DEN` into `bond_pool`. The proposer keeps a valid (flipped)
+//!   claim that still counts in the plurality, so they REMAIN surviving (not
+//!   disqualified, `surviving_count` untouched).
+//! * **Submitted, not flipped**: no slash; remains surviving.
+//!
+//! Each proposer is ai-finalized exactly once: an already-ai-finalized proposer
+//! aborts with [`KassandraError::AlreadySettled`].
+//!
+//! # Accounts
+//! 0. oracle — writable, owned by this program
+//! 1. onward — the tail: a non-empty subset of the oracle's proposers, each
+//!    writable, owned by this program, belonging to this oracle, distinct.
+//!
+//! # Instruction payload
+//! Empty (after the 1-byte discriminant).
+
+use pinocchio::{
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult,
+};
+
+use crate::{
+    clock::{now, require_after_end, require_phase},
+    config::{FLIP_SLASH_DEN, FLIP_SLASH_NUM, PHASE_WINDOW},
+    error::KassandraError,
+    processor::guards::{load_oracle, load_proposer},
+    state::{Oracle, Phase, Proposer, CLAIM_OPTION_NONE},
+};
+
+/// Reject if `key` appears in `prior` (distinctness within the call).
+fn require_distinct(prior: &[AccountInfo], key: &Pubkey) -> ProgramResult {
+    for a in prior {
+        if a.key() == key {
+            return Err(KassandraError::InvalidAccount.into());
+        }
+    }
+    Ok(())
+}
+
+pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -> ProgramResult {
+    let [oracle_ai, tail @ ..] = accounts else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    // Owner + size + account_type check, then an owned copy for mutation.
+    let mut oracle: Oracle = load_oracle(oracle_ai, program_id)?;
+
+    require_phase(&oracle, Phase::AiClaim)?;
+    let now = now()?;
+    require_after_end(&oracle, now)?;
+
+    // At least one proposer must be supplied to do any work.
+    if tail.is_empty() {
+        return Err(KassandraError::IncompleteFactSet.into());
+    }
+
+    for (i, p_ai) in tail.iter().enumerate() {
+        require_distinct(&tail[..i], p_ai.key())?;
+
+        let mut proposer = load_proposer(p_ai, program_id)?;
+        if proposer.oracle != *oracle_ai.key() {
+            return Err(KassandraError::InvalidAccount.into());
+        }
+        // Idempotency: each proposer is ai-finalized exactly once.
+        if proposer.is_ai_finalized() {
+            return Err(KassandraError::AlreadySettled.into());
+        }
+
+        if proposer.is_disqualified() {
+            // Already out (e.g. slashed in a prior phase). Don't slash again;
+            // just mark + count so the set can complete. Not surviving.
+        } else if proposer.claim_option == CLAIM_OPTION_NONE {
+            // No-show: full slash.
+            proposer.slashed = 1;
+            proposer.disqualified = 1;
+            oracle.bond_pool = oracle
+                .bond_pool
+                .checked_add(proposer.bond)
+                .ok_or(ProgramError::ArithmeticOverflow)?;
+            oracle.surviving_count = oracle
+                .surviving_count
+                .checked_sub(1)
+                .ok_or(ProgramError::ArithmeticOverflow)?;
+        } else if proposer.is_flipped() {
+            // Flip: partial slash, but the (flipped) claim still counts —
+            // proposer remains surviving and is NOT disqualified.
+            let slash = ((proposer.bond as u128) * (FLIP_SLASH_NUM as u128)
+                / (FLIP_SLASH_DEN as u128)) as u64;
+            proposer.slashed = 1;
+            oracle.bond_pool = oracle
+                .bond_pool
+                .checked_add(slash)
+                .ok_or(ProgramError::ArithmeticOverflow)?;
+        }
+        // else: submitted, not flipped — no slash, remains surviving.
+
+        proposer.ai_finalized = 1;
+        oracle.ai_finalized_count = oracle
+            .ai_finalized_count
+            .checked_add(1)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+
+        let mut data = p_ai.try_borrow_mut_data()?;
+        data[..Proposer::LEN].copy_from_slice(bytemuck::bytes_of(&proposer));
+    }
+
+    // Advance only once the whole proposer set has been ai-finalized.
+    if oracle.ai_finalized_count == oracle.proposer_count {
+        oracle.set_phase(Phase::Challenge);
+        oracle.phase_ends_at = now
+            .checked_add(PHASE_WINDOW)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+    }
+
+    let mut data = oracle_ai.try_borrow_mut_data()?;
+    data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
+    Ok(())
+}

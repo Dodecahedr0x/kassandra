@@ -45,6 +45,12 @@ pub enum KassandraError {
     /// `finalize_facts` was invoked on an oracle whose `dispute_bond_total` is
     /// zero, so the fact-approval threshold would be undefined (defensive).
     NoDisputeBond = 11,
+    /// An AI claim already exists for this proposer (the AiClaim PDA is already
+    /// initialized): one claim per proposer.
+    DuplicateClaim = 12,
+    /// The claimed `option` is out of range for this oracle
+    /// (`option >= options_count`).
+    InvalidOption = 13,
 }
 
 impl From<KassandraError> for ProgramError {

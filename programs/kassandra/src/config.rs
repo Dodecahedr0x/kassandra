@@ -15,3 +15,11 @@ pub const PHASE_WINDOW: i64 = 3600;
 pub const THRESHOLD_NUM: u64 = 2;
 /// Protocol-global supermajority threshold (denominator) for fact approval.
 pub const THRESHOLD_DEN: u64 = 3;
+
+/// Fraction (numerator) of a proposer's bond slashed when they FLIP their value
+/// at AI-claim time (submitted a `claim_option != original_option`). A flip is
+/// penalized but not fatal: the proposer keeps a valid (flipped) claim that
+/// still counts in the plurality, so they remain surviving. Default 1/2 (50%).
+pub const FLIP_SLASH_NUM: u64 = 1;
+/// Fraction (denominator) of the flip slash. See [`FLIP_SLASH_NUM`].
+pub const FLIP_SLASH_DEN: u64 = 2;

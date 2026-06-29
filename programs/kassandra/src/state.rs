@@ -101,8 +101,9 @@ pub struct Oracle {
     pub bond_pool: u64,          // accumulated slashed KASS (base units)
     pub dispute_bond_total: u64, // Σ proposer bonds, fixed at dispute start; fact-quorum denominator
     pub settled_count: u16,      // facts settled so far (drives incremental finalize)
+    pub ai_finalized_count: u16, // proposers ai-finalized so far (drives incremental finalize_ai_claims)
     pub bump: u8,
-    pub _pad1: [u8; 5],
+    pub _pad1: [u8; 3],
     pub prompt_hash: [u8; 32], // hash of fixed prompt + interpretation
 }
 
@@ -135,7 +136,8 @@ pub struct Proposer {
     pub slashed: u8,         // bool
     pub flipped: u8,         // bool: claim_option != original_option
     pub bump: u8,
-    pub _pad: [u8; 2],
+    pub ai_finalized: u8, // bool: settled by finalize_ai_claims (idempotency marker)
+    pub _pad: [u8; 1],
 }
 
 impl Proposer {
@@ -149,6 +151,9 @@ impl Proposer {
     }
     pub fn is_flipped(&self) -> bool {
         self.flipped != 0
+    }
+    pub fn is_ai_finalized(&self) -> bool {
+        self.ai_finalized != 0
     }
 }
 

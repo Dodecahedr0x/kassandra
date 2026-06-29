@@ -22,6 +22,9 @@ pub enum Ix {
     /// Permissionless `FactProposal -> FactVoting` freeze once the proposal
     /// window has elapsed.
     AdvancePhase = 7,
+    /// Incremental settlement of the AI-claim round once its window has elapsed
+    /// (slash no-shows fully, flippers partially), advancing to `Challenge`.
+    FinalizeAiClaims = 8,
     // Future variants are APPENDED here with the next discriminant; add a
     // matching arm to `from_u8` below.
 }
@@ -39,6 +42,7 @@ impl Ix {
             5 => Some(Ix::SettleChallenge),
             6 => Some(Ix::FinalizeOracle),
             7 => Some(Ix::AdvancePhase),
+            8 => Some(Ix::FinalizeAiClaims),
             _ => None,
         }
     }
