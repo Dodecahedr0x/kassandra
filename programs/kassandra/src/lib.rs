@@ -14,6 +14,7 @@ pub mod clock;
 pub mod config;
 pub mod cpi;
 pub mod error;
+pub mod fee;
 pub mod instruction;
 pub mod plurality;
 pub mod processor;

@@ -50,6 +50,47 @@ pub const MARKET_THRESHOLD_NUM: u128 = 1;
 /// Market slash-trigger margin (denominator). See [`MARKET_THRESHOLD_NUM`].
 pub const MARKET_THRESHOLD_DEN: u128 = 10;
 
+// ---------------------------------------------------------------------------
+// Dynamic creation fee (KASS, burned) — Task H2 / design §8.
+// ---------------------------------------------------------------------------
+//
+// The oracle-creation fee is paid in KASS and BURNED. It is proportional to an
+// exponentially-decaying moving average ("EMA") of recent creation activity:
+//
+//   fee = FEE_PER_EMA_UNIT * (decayed_fee_ema / FEE_EMA_SCALE)
+//
+// `Protocol.fee_ema` is a fixed-point accumulator scaled by [`FEE_EMA_SCALE`]
+// (so `fee_ema == FEE_EMA_SCALE` means "1.0 creation units of recent activity").
+// On every creation we (1) decay the stored EMA toward 0 by the time elapsed
+// since the last creation, (2) charge a fee proportional to that decayed value,
+// then (3) bump the EMA by [`FEE_EMA_INCREMENT`] and stamp `last_creation_unix`.
+//
+// Consequences (design §8 "fee monotonicity"):
+//   * Genesis: `fee_ema == 0` → decayed 0 → fee 0 (free bootstrap).
+//   * Demand: rapid creations stack [`FEE_EMA_INCREMENT`] faster than decay can
+//     erase it → EMA grows → fee grows.
+//   * Idle: no creations → the EMA decays exponentially toward 0 → fee shrinks
+//     back to 0.
+// The fee is never negative and moves only as a function of the creation-rate
+// EMA. All fee math is done in `u128` intermediates and is overflow-safe.
+
+/// Fixed-point scale for [`crate::state::Protocol::fee_ema`]. `fee_ema` of this
+/// value represents 1.0 "creation units" of recent activity.
+pub const FEE_EMA_SCALE: u128 = 1_000_000_000;
+
+/// Half-life (seconds) of the activity EMA: after this much idle time the EMA
+/// (and thus the fee) halves. 1 day. Governance-tunable.
+pub const FEE_EMA_HALFLIFE_SECS: i64 = 86_400;
+
+/// Scaled EMA bump added per oracle creation: exactly one "creation unit"
+/// (`1.0 * FEE_EMA_SCALE`). Each creation adds this to the (decayed) EMA.
+pub const FEE_EMA_INCREMENT: u64 = FEE_EMA_SCALE as u64;
+
+/// KASS base units charged per 1.0 of EMA activity (i.e. per `FEE_EMA_SCALE` of
+/// `fee_ema`). KASS has 9 decimals, so this is 1 KASS per unit of EMA.
+/// Governance-tunable.
+pub const FEE_PER_EMA_UNIT: u64 = 1_000_000_000;
+
 /// Fraction (numerator) of a proposer's bond slashed when they FLIP their value
 /// at AI-claim time (submitted a `claim_option != original_option`). A flip is
 /// penalized but not fatal: the proposer keeps a valid (flipped) claim that

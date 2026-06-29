@@ -8,21 +8,29 @@
 //! the [`Protocol`] singleton, so an oracle cannot be created against a spoofed
 //! KASS mint (this is what makes the Task H2 fee-burn trustworthy).
 //!
-//! NO creation fee is charged here — the dynamic EMA KASS burn is Task H2.
+//! # Creation fee (Task H2 / design §8)
+//! A KASS fee proportional to an EMA of recent creation activity is BURNED from
+//! the creator's KASS token account. The [`Protocol`] carries the fixed-point
+//! `fee_ema` accumulator: on each creation we decay it toward 0 by the elapsed
+//! idle time, charge `fee = FEE_PER_EMA_UNIT * decayed_ema / FEE_EMA_SCALE`,
+//! burn it (creator signs as the burn authority), then bump the EMA by one
+//! creation unit and stamp `last_creation_unix`. The first-ever creation has
+//! `fee_ema == 0` → fee 0 (genesis is free). See [`crate::fee`] / [`crate::config`].
 //!
 //! # PDA seeds (CONTRACT)
 //! * Oracle: `[b"oracle", &nonce.to_le_bytes()]`, program = [`crate::ID`].
 //! * Stake vault: `[b"vault", oracle_pubkey]`, program = [`crate::ID`].
 //!
 //! # Accounts
-//! 0. protocol         — read-only; pins the canonical KASS/USDC mints
-//! 1. oracle PDA       — writable, uninitialized (created here)
-//! 2. stake_vault PDA  — writable, uninitialized (created + initialized here)
-//! 3. creator          — signer, writable; pays the rent, recorded as `creator`
-//! 4. kass_mint        — must equal `protocol.kass_mint`
-//! 5. usdc_mint        — must equal `protocol.usdc_mint`
+//! 0. protocol            — writable; pins the canonical mints + holds/updates `fee_ema`
+//! 1. oracle PDA          — writable, uninitialized (created here)
+//! 2. stake_vault PDA     — writable, uninitialized (created + initialized here)
+//! 3. creator             — signer, writable; pays rent, recorded as `creator`, burn authority
+//! 4. kass_mint           — writable (burn decrements supply); must equal `protocol.kass_mint`
+//! 5. usdc_mint           — must equal `protocol.usdc_mint`
 //! 6. token program
 //! 7. system program
+//! 8. creator_kass_token  — writable; KASS token account on `kass_mint` the fee is burned from
 //!
 //! # Instruction payload (after the 1-byte discriminant), exactly 57 bytes
 //! `nonce: u64 LE` ++ `prompt_hash: [u8; 32]` ++ `options_count: u8` ++
@@ -37,14 +45,15 @@ use pinocchio::{
     sysvars::{rent::Rent, Sysvar},
     ProgramResult,
 };
-use pinocchio_token::instructions::InitializeAccount3;
+use pinocchio_token::instructions::{Burn, InitializeAccount3};
 
 use crate::{
     clock::now,
     config::PROPOSAL_WINDOW,
     error::KassandraError,
+    fee::{bumped_fee_ema, decay_fee_ema, fee_for_ema},
     processor::guards::{assert_key, assert_signer, create_pda, load_protocol},
-    state::{AccountType, Oracle, Phase},
+    state::{AccountType, Oracle, Phase, Protocol},
 };
 
 /// Exact payload length: nonce[8] ++ prompt_hash[32] ++ options_count[1] ++
@@ -66,7 +75,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     let deadline = i64::from_le_bytes(payload[41..49].try_into().unwrap());
     let twap_window = i64::from_le_bytes(payload[49..57].try_into().unwrap());
 
-    let [protocol_ai, oracle_ai, stake_vault_ai, creator_ai, kass_mint_ai, usdc_mint_ai, token_prog_ai, system_prog_ai, ..] =
+    let [protocol_ai, oracle_ai, stake_vault_ai, creator_ai, kass_mint_ai, usdc_mint_ai, token_prog_ai, system_prog_ai, creator_kass_ai, ..] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -83,10 +92,11 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     assert_key(usdc_mint_ai, &protocol.usdc_mint)?;
 
     // --- semantic validations ----------------------------------------------
+    let now_ts = now()?;
     if options_count < 2 {
         return Err(KassandraError::InvalidOptionsCount.into());
     }
-    if deadline < now()? {
+    if deadline < now_ts {
         return Err(KassandraError::InvalidDeadline.into());
     }
     if twap_window <= 0 {
@@ -105,6 +115,44 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // Reject if the oracle PDA already exists (a duplicate nonce).
     if oracle_ai.lamports() != 0 || !oracle_ai.data_is_empty() {
         return Err(KassandraError::InvalidAccount.into());
+    }
+
+    // --- dynamic EMA creation fee (burned in KASS) -------------------------
+    // Decay the stored activity EMA toward 0 by the idle time since the last
+    // creation, charge a fee proportional to it, burn it, then record the bumped
+    // EMA + timestamp. Genesis (`fee_ema == 0`) decays to 0 → fee 0 → no burn.
+    let decayed_ema = decay_fee_ema(protocol.fee_ema, protocol.last_creation_unix, now_ts);
+    let fee = fee_for_ema(decayed_ema);
+    if fee > 0 {
+        // The burn source must be a KASS token account; the SPL Burn additionally
+        // proves the creator (signer) is its owner/delegate.
+        let kass_token_mint = {
+            let data = creator_kass_ai.try_borrow_data()?;
+            if data.len() < 32 {
+                return Err(KassandraError::InvalidAccount.into());
+            }
+            let mut m = [0u8; 32];
+            m.copy_from_slice(&data[0..32]);
+            m
+        };
+        if kass_token_mint != *kass_mint_ai.key() {
+            return Err(KassandraError::InvalidAccount.into());
+        }
+        Burn {
+            account: creator_kass_ai,
+            mint: kass_mint_ai,
+            authority: creator_ai,
+            amount: fee,
+        }
+        .invoke()?;
+    }
+    // Persist the new EMA state (protocol is writable).
+    {
+        let mut protocol_mut = protocol;
+        protocol_mut.fee_ema = bumped_fee_ema(decayed_ema);
+        protocol_mut.last_creation_unix = now_ts;
+        let mut data = protocol_ai.try_borrow_mut_data()?;
+        data[..Protocol::LEN].copy_from_slice(bytemuck::bytes_of(&protocol_mut));
     }
 
     // --- create the stake vault (program-signed) ---------------------------

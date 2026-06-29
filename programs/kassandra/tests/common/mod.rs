@@ -105,6 +105,10 @@ pub struct TestCtx {
     pub payer: Keypair,
     pub kass_mint: Pubkey,
     pub usdc_mint: Pubkey,
+    /// A KASS token account owned by the payer, funded and backed by mint supply
+    /// (so a real `Burn` decrements both balance and supply). Used as the
+    /// creator's burn source for `create_oracle`'s dynamic fee.
+    pub payer_kass: Pubkey,
     pub program_id: Pubkey,
     /// Monotonic counter for fresh oracle nonces.
     next_nonce: u64,
@@ -136,6 +140,7 @@ impl TestCtx {
             payer,
             kass_mint: Pubkey::default(),
             usdc_mint: Pubkey::default(),
+            payer_kass: Pubkey::default(),
             program_id,
             next_nonce: 0,
             oracles: HashMap::new(),
@@ -144,6 +149,10 @@ impl TestCtx {
         let authority = ctx.payer.pubkey();
         ctx.kass_mint = ctx.create_mint(KASS_DECIMALS, authority);
         ctx.usdc_mint = ctx.create_mint(USDC_DECIMALS, authority);
+        // Bankroll the payer with KASS backed by real mint supply so the
+        // creation-fee burn reduces both the balance AND the supply.
+        let payer = ctx.payer.pubkey();
+        ctx.payer_kass = ctx.fund_kass_minted(payer, 1_000_000_000_000_000);
         ctx
     }
 
@@ -275,14 +284,15 @@ impl TestCtx {
         Instruction {
             program_id: self.program_id,
             accounts: vec![
-                AccountMeta::new_readonly(protocol_pda, false),
+                AccountMeta::new(protocol_pda, false),
                 AccountMeta::new(oracle, false),
                 AccountMeta::new(stake_vault, false),
                 AccountMeta::new(self.payer.pubkey(), true),
-                AccountMeta::new_readonly(kass_mint, false),
+                AccountMeta::new(kass_mint, false),
                 AccountMeta::new_readonly(usdc_mint, false),
                 AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
                 AccountMeta::new_readonly(system_program::ID, false),
+                AccountMeta::new(self.payer_kass, false),
             ],
             data,
         }
@@ -454,6 +464,26 @@ impl TestCtx {
     /// Used to bankroll a fact submitter.
     pub fn fund_kass(&mut self, owner: &Keypair, amount: u64) -> Pubkey {
         self.create_token_account(self.kass_mint, owner.pubkey(), amount)
+    }
+
+    /// Like [`TestCtx::fund_kass`] but ALSO increases the KASS mint's `supply` by
+    /// `amount`, so the fabricated balance is backed by real supply. A real
+    /// SPL `Burn` checks-subtracts the mint supply, so a burn source that was
+    /// only fabricated (supply still 0) would underflow; this keeps them
+    /// consistent for the creation-fee burn tests.
+    pub fn fund_kass_minted(&mut self, owner: Pubkey, amount: u64) -> Pubkey {
+        let acct = self.create_token_account(self.kass_mint, owner, amount);
+        self.add_mint_supply(self.kass_mint, amount);
+        acct
+    }
+
+    /// Read an SPL mint's circulating `supply` (base units).
+    pub fn mint_supply(&self, mint: Pubkey) -> u64 {
+        let acc = self
+            .svm
+            .get_account(&mint)
+            .unwrap_or_else(|| panic!("mint {mint} not found"));
+        Mint::unpack(&acc.data).expect("not a mint").supply
     }
 
     /// Retrieve the bookkeeping for a previously seeded oracle.
@@ -661,6 +691,32 @@ impl TestCtx {
             )
             .unwrap();
         mint
+    }
+
+    /// Increase an existing fabricated mint's `supply` by `delta`, rewriting its
+    /// account data in place. Keeps fabricated token balances backed by supply
+    /// so a real `Burn` does not underflow.
+    fn add_mint_supply(&mut self, mint: Pubkey, delta: u64) {
+        let acc = self
+            .svm
+            .get_account(&mint)
+            .unwrap_or_else(|| panic!("mint {mint} not found"));
+        let mut state = Mint::unpack(&acc.data).expect("not a mint");
+        state.supply = state.supply.checked_add(delta).expect("supply overflow");
+        let mut data = vec![0u8; Mint::LEN];
+        state.pack_into_slice(&mut data);
+        self.svm
+            .set_account(
+                mint,
+                Account {
+                    lamports: acc.lamports,
+                    data,
+                    owner: TOKEN_PROGRAM_ID,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .unwrap();
     }
 
     /// Fabricate an initialized SPL token account holding `amount` of `mint`,
