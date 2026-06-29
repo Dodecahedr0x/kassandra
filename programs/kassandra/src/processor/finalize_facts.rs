@@ -135,6 +135,12 @@ fn finalize_no_facts(
 
         proposer.disqualified = 1;
         proposer.slashed = 1;
+        // Record the per-proposer slash so the identity "a proposer's bond_pool
+        // contribution == its slashed_amount" holds on EVERY slash path (no-show,
+        // flip, challenge-fail, and this no-facts dead-end) — the deferred
+        // settlement layer can then reconcile each proposer's loss uniformly,
+        // without a path-specific special case.
+        proposer.slashed_amount = proposer.bond;
         oracle.bond_pool = oracle
             .bond_pool
             .checked_add(proposer.bond)

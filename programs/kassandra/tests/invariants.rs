@@ -62,15 +62,16 @@
 //! * **#10 closure** — DEFERRED: AiClaim-account closure / rent reclamation is an
 //!   un-built separate instruction (see `finalize_oracle.rs` docs).
 //!
-//! ## FINDING (documented, not a §9 violation)
-//! The no-facts dead-end branch of `finalize_facts` moves each proposer's `bond`
-//! into `bond_pool` but does NOT set `proposer.slashed_amount` (it stays 0),
-//! whereas `finalize_ai_claims` does. So the code-doc'd internal identity
-//! "a proposer's bond_pool contribution == its slashed_amount" does NOT hold on
-//! the no-facts path. This is a bookkeeping gap, not a §9 #3 violation
-//! (counter-conservation `bond_pool == Σ bonds` still holds and IS asserted). The
-//! harness therefore asserts the `slashed_amount` identity only on the AiClaim
-//! path and documents the exclusion here.
+//! ## Uniform per-proposer slash identity (asserted on ALL paths)
+//! Every slash path — `finalize_ai_claims` (no-show / flip), `settle_challenge`
+//! (challenge-fail), and the `finalize_facts` no-facts dead-end — records the
+//! amount it adds to `bond_pool` in `proposer.slashed_amount`. The harness
+//! therefore asserts `proposer.slashed_amount == that proposer's bond_pool
+//! contribution` for EVERY slashed proposer (including the no-facts dead-end in
+//! Arm A), and reconciles `bond_pool == Σ proposer.slashed_amount + Σ
+//! rejected-fact stakes` on both terminal paths. (An earlier revision left
+//! `slashed_amount == 0` on the no-facts path; that gap is now fixed in
+//! `finalize_facts`, so the identity is uniform and no longer path-scoped.)
 
 mod common;
 use common::*;
@@ -185,10 +186,12 @@ struct ReferenceModel {
     fact_class: Vec<FactClass>,
     /// Expected terminal state.
     terminal: Terminal,
-    /// On the AiClaim path: Σ proposer.slashed_amount (cross-check); None on the
-    /// no-facts path (the slashed_amount field is not populated there).
-    ai_path_slash_total: Option<u64>,
-    /// Per-proposer expected (slashed, disqualified, slashed_amount), AiClaim path.
+    /// Σ proposer.slashed_amount — populated on EVERY path (the no-facts dead-end
+    /// now records each proposer's bond as its slashed_amount, like every other
+    /// slash path), so the per-proposer identity is asserted uniformly.
+    slash_total: u64,
+    /// Per-proposer expected `(slashed, disqualified, slashed_amount)`, in
+    /// scenario order; populated on every path.
     proposer_expect: Vec<(bool, bool, u64)>,
     options_count: u8,
 }
@@ -232,14 +235,17 @@ impl ReferenceModel {
 
         // ---- no-facts dead-end ------------------------------------------------
         if s.facts.is_empty() {
+            // Every proposer is fully slashed; slashed_amount == bond on this path
+            // too (uniform identity).
+            let proposer_expect = s.proposers.iter().map(|p| (true, true, p.bond)).collect();
             return ReferenceModel {
                 total_in,
                 bond_pool: dispute_bond_total, // every bond slashed into the pool
                 surviving_count: 0,
                 fact_class: Vec::new(),
                 terminal: Terminal::DeadendNoFacts,
-                ai_path_slash_total: None, // slashed_amount NOT set on this path
-                proposer_expect: Vec::new(),
+                slash_total: dispute_bond_total,
+                proposer_expect,
                 options_count,
             };
         }
@@ -303,7 +309,7 @@ impl ReferenceModel {
             surviving_count,
             fact_class,
             terminal,
-            ai_path_slash_total: Some(slash_total),
+            slash_total,
             proposer_expect,
             options_count,
         }
@@ -607,11 +613,21 @@ fn run_full_dispute(s: &Scenario) -> Result<(), TestCaseError> {
         prop_assert_eq!(o.phase, Phase::InvalidDeadend as u8);
         prop_assert_eq!(o.surviving_count, 0);
         prop_assert_eq!(o.bond_pool, model.bond_pool);
-        for pda in &proposer_pdas {
+        // §9 #3 / uniform identity: every proposer is fully slashed and its
+        // slashed_amount == bond (the same value added to bond_pool) on the
+        // no-facts dead-end path too — no longer scoped to the AiClaim path.
+        let mut slash_total = 0u64;
+        for (i, pda) in proposer_pdas.iter().enumerate() {
             let p = ctx.proposer(*pda);
-            prop_assert_eq!(p.slashed, 1);
-            prop_assert_eq!(p.disqualified, 1);
+            let (exp_slashed, exp_disq, exp_amount) = model.proposer_expect[i];
+            prop_assert_eq!(p.slashed != 0, exp_slashed);
+            prop_assert_eq!(p.disqualified != 0, exp_disq);
+            prop_assert_eq!(p.slashed_amount, exp_amount);
+            slash_total += p.slashed_amount;
         }
+        // No facts => no rejected-fact stakes; bond_pool == Σ slashed_amount.
+        prop_assert_eq!(o.bond_pool, slash_total);
+        prop_assert_eq!(model.slash_total, slash_total);
         // §9 #3 conservation holds; §9 #9 single terminal state reached.
         assert_conservation_step(&ctx, oracle, vault)?;
         prop_assert_eq!(model.terminal, Terminal::DeadendNoFacts);
@@ -676,8 +692,8 @@ fn run_full_dispute(s: &Scenario) -> Result<(), TestCaseError> {
     prop_assert_eq!(o.surviving_count, model.surviving_count);
 
     // §9 #3 / #4 / #9: per-proposer slash outcome matches the reference; the
-    // documented internal identity bond_pool == Σ slashed_amount + Σ rejected
-    // holds on this (AiClaim) path.
+    // internal identity bond_pool == Σ slashed_amount + Σ rejected-fact stakes
+    // holds (the slashed_amount identity is uniform across all slash paths).
     let mut on_chain_slash_total = 0u64;
     for (i, pda) in proposer_pdas.iter().enumerate() {
         let p = ctx.proposer(*pda);
@@ -698,9 +714,9 @@ fn run_full_dispute(s: &Scenario) -> Result<(), TestCaseError> {
     prop_assert_eq!(
         o.bond_pool,
         on_chain_slash_total + rejected_stakes,
-        "bond_pool == Σ slashed_amount + Σ rejected-fact stakes (AiClaim path)"
+        "bond_pool == Σ slashed_amount + Σ rejected-fact stakes"
     );
-    prop_assert_eq!(model.ai_path_slash_total.unwrap(), on_chain_slash_total);
+    prop_assert_eq!(model.slash_total, on_chain_slash_total);
     assert_conservation_step(&ctx, oracle, vault)?;
 
     // §9 #1: finalize_oracle attempted before Challenge window elapsed must fail

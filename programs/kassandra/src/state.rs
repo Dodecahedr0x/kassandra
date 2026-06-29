@@ -165,10 +165,12 @@ pub struct Proposer {
     pub ai_finalized: u8, // bool: settled by finalize_ai_claims (idempotency marker)
     pub _pad: [u8; 1],
     // KASS slashed from this proposer into the oracle's `bond_pool`. Set
-    // authoritatively by `finalize_ai_claims` (no-show => bond; flip =>
-    // bond*FLIP_SLASH_NUM/FLIP_SLASH_DEN). Invariant: a proposer's contribution
-    // to `bond_pool` always equals its `slashed_amount`, so Task 13
-    // conservation reconciles without recomputing a fragile formula.
+    // authoritatively on EVERY slash path: `finalize_ai_claims` (no-show => bond;
+    // flip => bond*FLIP_SLASH_NUM/FLIP_SLASH_DEN), `settle_challenge`
+    // (challenge-fail => bond), and the `finalize_facts` no-facts dead-end
+    // (=> bond). Invariant: a proposer's contribution to `bond_pool` always
+    // equals its `slashed_amount`, so the deferred settlement layer (and Task 13
+    // conservation) reconciles uniformly without a path-specific special case.
     pub slashed_amount: u64,
 }
 

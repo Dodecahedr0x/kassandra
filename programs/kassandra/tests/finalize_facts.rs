@@ -283,22 +283,30 @@ fn finalize_no_facts_deadend_slashes_all_proposers() {
     advance_to_voting(&mut ctx, oracle);
 
     let proposer_pdas: Vec<Pubkey> = ctx.proposers(oracle).iter().map(|p| p.pda).collect();
-    let total_bonds: u64 = ctx.proposers(oracle).iter().map(|p| p.bond).sum();
+    let bonds: Vec<u64> = ctx.proposers(oracle).iter().map(|p| p.bond).collect();
+    let total_bonds: u64 = bonds.iter().sum();
 
     ctx.warp(WINDOW + 1);
     ctx.send(finalize_facts_ix(&ctx, oracle, &proposer_pdas), &[])
         .expect("finalize_facts (no-facts) should succeed");
 
-    for pda in &proposer_pdas {
+    let mut slash_total = 0u64;
+    for (pda, bond) in proposer_pdas.iter().zip(&bonds) {
         let p = ctx.proposer(*pda);
         assert_eq!(p.slashed, 1);
         assert_eq!(p.disqualified, 1);
+        // Uniform identity: each proposer's bond_pool contribution equals its
+        // recorded slashed_amount, even on the no-facts dead-end path.
+        assert_eq!(p.slashed_amount, *bond);
+        slash_total += p.slashed_amount;
     }
 
     let o = ctx.oracle(oracle);
     assert_eq!(o.phase, Phase::InvalidDeadend as u8);
     assert_eq!(o.surviving_count, 0);
     assert_eq!(o.bond_pool, total_bonds);
+    // bond_pool == Σ proposer.slashed_amount on this path too.
+    assert_eq!(o.bond_pool, slash_total);
 }
 
 #[test]
