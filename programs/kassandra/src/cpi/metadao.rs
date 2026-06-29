@@ -2,17 +2,21 @@
 //!
 //! # Resolved program IDs (authoritatively sourced — see `scripts/fetch-metadao.sh`)
 //!
-//! | program            | id                                            | version |
-//! |--------------------|-----------------------------------------------|---------|
-//! | `conditional_vault`| `VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg` | v0.4.0  |
-//! | `amm`              | `AMMyu265tkBpRW21iGQxKGLaves3gKm2JcMUqfXNSpqD` | v0.4    |
+//! | program            | id                                            | version              |
+//! |--------------------|-----------------------------------------------|----------------------|
+//! | `conditional_vault`| `VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg` | v0.4.0               |
+//! | `amm`              | `AMMyu265tkBpRW21iGQxKGLaves3gKm2JcMUqfXNSpqD` | v0.4.2 (delayed-twap)|
 //!
 //! Source of truth: `github.com/metaDAOproject/programs` — the `declare_id!`s in
-//! `programs/conditional_vault/src/lib.rs` (`main`) and `programs/amm/src/lib.rs`
-//! (tag `v0.4`), cross-checked against `Anchor.toml` and the live mainnet-beta
-//! deployments. MetaDAO governance v0.5+ moved AMM liquidity to Meteora DAMM v2
-//! (`programs/damm_v2_cpi`), so `AMMyu…` is the last first-party MetaDAO AMM and
-//! the one whose built-in TWAP oracle matches our decision-market design.
+//! `programs/conditional_vault/src/lib.rs` and `programs/amm/src/lib.rs`,
+//! cross-checked against `Anchor.toml` and the live mainnet-beta deployments. The
+//! DEPLOYED `amm` binary (`AMMyu…`, dumped at mainnet slot 326427490) is the
+//! **delayed-twap v0.4.1/v0.4.2** build (tags `delayed-twap-v0.4.1`,
+//! `proposal-duration-v0.4.2`), NOT the base `v0.4` tag — it added
+//! `TwapOracle.start_delay_slots` + `CreateAmmArgs.twap_start_delay_slots` (see
+//! the `Amm` layout block below). MetaDAO governance v0.5+ moved AMM liquidity to
+//! Meteora DAMM v2 (`programs/damm_v2_cpi`), so `AMMyu…` is the last first-party
+//! MetaDAO AMM and the one whose built-in TWAP oracle matches our design.
 //!
 //! # Anchor discriminators
 //!
@@ -36,10 +40,13 @@
 use pinocchio::{
     account_info::AccountInfo,
     instruction::{AccountMeta, Instruction, Signer},
+    program_error::ProgramError,
     pubkey::{find_program_address, Pubkey},
     ProgramResult,
 };
 use pinocchio_pubkey::pubkey;
+
+use crate::error::KassandraError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Program IDs
@@ -148,6 +155,11 @@ pub const VAULT_UNDERLYING_ACCOUNT_OFFSET: usize = 72;
 // — a slot-weighted average of the quote/base price (scaled by PRICE_SCALE =
 // 1e12). settle_challenge reads exactly those four fields and mirrors that math.
 
+/// Anchor account discriminator for `Amm` (`sha256("account:Amm")[..8]`). The
+/// first 8 bytes of every `Amm` account; checked in settle as defense-in-depth
+/// on top of the conditional mint-pair binding.
+pub const AMM_ACCOUNT_DISCRIMINATOR: [u8; 8] = [0x8f, 0xf5, 0xc8, 0x11, 0x4a, 0xd6, 0xc4, 0x87];
+
 /// `Amm.created_at_slot: u64` — byte offset.
 pub const AMM_CREATED_AT_SLOT_OFFSET: usize = 9;
 /// `Amm.base_mint: Pubkey` — byte offset.
@@ -164,6 +176,44 @@ pub const AMM_START_DELAY_SLOTS_OFFSET: usize = 219;
 /// (`start_delay_slots` end). The real account is larger (`8 +
 /// size_of::<Amm>()`).
 pub const AMM_MIN_LEN: usize = AMM_START_DELAY_SLOTS_OFFSET + 8;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Little-endian field readers (single source of truth, co-located with the
+// offset consts). Shared by `open_challenge` and `settle_challenge` so the two
+// processors decode MetaDAO account fields the same way; out-of-bounds reads map
+// to `KassandraError::InvalidAccount`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Read a 32-byte pubkey out of `data` at byte `off`, or `InvalidAccount`.
+pub fn read_pubkey(data: &[u8], off: usize) -> Result<Pubkey, ProgramError> {
+    data.get(off..off + 32)
+        .and_then(|s| s.try_into().ok())
+        .ok_or_else(|| KassandraError::InvalidAccount.into())
+}
+
+/// Read a little-endian `u32` out of `data` at byte `off`, or `InvalidAccount`.
+pub fn read_u32(data: &[u8], off: usize) -> Result<u32, ProgramError> {
+    data.get(off..off + 4)
+        .and_then(|s| s.try_into().ok())
+        .map(u32::from_le_bytes)
+        .ok_or_else(|| KassandraError::InvalidAccount.into())
+}
+
+/// Read a little-endian `u64` out of `data` at byte `off`, or `InvalidAccount`.
+pub fn read_u64(data: &[u8], off: usize) -> Result<u64, ProgramError> {
+    data.get(off..off + 8)
+        .and_then(|s| s.try_into().ok())
+        .map(u64::from_le_bytes)
+        .ok_or_else(|| KassandraError::InvalidAccount.into())
+}
+
+/// Read a little-endian `u128` out of `data` at byte `off`, or `InvalidAccount`.
+pub fn read_u128(data: &[u8], off: usize) -> Result<u128, ProgramError> {
+    data.get(off..off + 16)
+        .and_then(|s| s.try_into().ok())
+        .map(u128::from_le_bytes)
+        .ok_or_else(|| KassandraError::InvalidAccount.into())
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Seed-slice assembly (host-runnable)

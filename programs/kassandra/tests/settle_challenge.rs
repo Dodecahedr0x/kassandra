@@ -112,14 +112,16 @@ fn fabricate_token_account(
         .unwrap();
 }
 
-/// Fabricate an account OWNED BY THE AMM PROGRAM with an `Amm`-shaped buffer
-/// whose `base_mint`/`quote_mint` are set to `base`/`quote` (defaults to bytes
-/// that will NOT match a real market's conditional mints unless asked). Used by
-/// the binding-attack test: `open_challenge` records it (it only checks
-/// `owner == AMM_ID`), and `settle` must then reject it on the mint binding.
+/// Fabricate an account OWNED BY THE AMM PROGRAM with a valid `Amm`
+/// discriminator but `base_mint`/`quote_mint` set to `base`/`quote` (which will
+/// NOT match a real market's conditional mints). Used by the binding-attack
+/// test: `open_challenge` records it (it only checks `owner == AMM_ID`), and
+/// `settle` must reject it on the conditional mint-pair binding (the valid disc
+/// proves the rejection is the MINT check, not the disc check).
 fn fabricate_rogue_amm(ctx: &mut TestCtx, base: Pubkey, quote: Pubkey) -> Pubkey {
     let addr = Pubkey::new_unique();
     let mut data = vec![0u8; 256];
+    data[..8].copy_from_slice(&metadao::AMM_ACCOUNT_DISCRIMINATOR);
     data[metadao::AMM_BASE_MINT_OFFSET..metadao::AMM_BASE_MINT_OFFSET + 32]
         .copy_from_slice(&base.to_bytes());
     data[metadao::AMM_QUOTE_MINT_OFFSET..metadao::AMM_QUOTE_MINT_OFFSET + 32]
@@ -272,6 +274,7 @@ fn build_amm(
     quote_mint: Pubkey,
     base_reserve: u64,
     quote_reserve: u64,
+    crank: bool,
 ) -> Pubkey {
     let payer = ctx.payer.pubkey();
     let base_arr = base_mint.to_bytes();
@@ -362,20 +365,25 @@ fn build_amm(
     ctx.send_many(&cu(ix_add), &[])
         .expect("add_liquidity failed");
 
-    // Advance > ONE_MINUTE_IN_SLOTS (150) so the crank records an observation.
-    ctx.warp_slots(0, 300);
+    // When `crank == false` the pool keeps reserves but NEVER records a TWAP
+    // observation (aggregator stays 0 → settle reads its TWAP as 0). Used by the
+    // pass_twap==0 survive test.
+    if crank {
+        // Advance > ONE_MINUTE_IN_SLOTS (150) so the crank records an observation.
+        ctx.warp_slots(0, 300);
 
-    let ix_crank = Instruction {
-        program_id: amm_id(),
-        accounts: vec![
-            AccountMeta::new(amm, false),
-            AccountMeta::new_readonly(amm_event_auth, false),
-            AccountMeta::new_readonly(amm_id(), false),
-        ],
-        data: metadao::CRANK_THAT_TWAP.to_vec(),
-    };
-    ctx.send_many(&cu(ix_crank), &[])
-        .expect("crank_that_twap failed");
+        let ix_crank = Instruction {
+            program_id: amm_id(),
+            accounts: vec![
+                AccountMeta::new(amm, false),
+                AccountMeta::new_readonly(amm_event_auth, false),
+                AccountMeta::new_readonly(amm_id(), false),
+            ],
+            data: metadao::CRANK_THAT_TWAP.to_vec(),
+        };
+        ctx.send_many(&cu(ix_crank), &[])
+            .expect("crank_that_twap failed");
+    }
 
     amm
 }
@@ -525,6 +533,9 @@ enum AmmAttack {
     RoguePass,
     /// Record the SAME real pool as both pass_amm and fail_amm.
     AliasPassAsFail,
+    /// Real pools, but the PASS pool is never cranked (pass_twap == 0). Used to
+    /// prove an un-cranked pass side makes the claim survive regardless of fail.
+    PassUncranked,
 }
 
 /// Full fixture: disputed oracle in Challenge, one challenged proposer with a
@@ -561,11 +572,27 @@ fn fixture_with_attack(pass_quote: u64, fail_quote: u64, attack: AmmAttack) -> (
 
     let (m, oracle_pass_kass, oracle_fail_kass) = setup_market(&mut ctx, oracle);
 
-    // Real pass/fail AMMs over the conditional (KASS, USDC) mint pairs.
-    let real_pass = build_amm(&mut ctx, m.pass_mint, m.pass_usdc, BASE_RESERVE, pass_quote);
-    let real_fail = build_amm(&mut ctx, m.fail_mint, m.fail_usdc, BASE_RESERVE, fail_quote);
+    // Real pass/fail AMMs over the conditional (KASS, USDC) mint pairs. The PASS
+    // pool is left un-cranked only for the PassUncranked case.
+    let crank_pass = attack != AmmAttack::PassUncranked;
+    let real_pass = build_amm(
+        &mut ctx,
+        m.pass_mint,
+        m.pass_usdc,
+        BASE_RESERVE,
+        pass_quote,
+        crank_pass,
+    );
+    let real_fail = build_amm(
+        &mut ctx,
+        m.fail_mint,
+        m.fail_usdc,
+        BASE_RESERVE,
+        fail_quote,
+        true,
+    );
     let (pass_amm, fail_amm) = match attack {
-        AmmAttack::None => (real_pass, real_fail),
+        AmmAttack::None | AmmAttack::PassUncranked => (real_pass, real_fail),
         AmmAttack::RoguePass => (
             fabricate_rogue_amm(&mut ctx, Pubkey::new_unique(), Pubkey::new_unique()),
             real_fail,
@@ -624,6 +651,8 @@ fn settle_fraud_disqualifies_and_resolves_fail_side() {
     let (mut ctx, f) = fixture(QUOTE_LOW, QUOTE_HIGH);
     let bond_pool_before = ctx.oracle(f.oracle).bond_pool;
     let surviving_before = ctx.oracle(f.oracle).surviving_count;
+    // open_challenge bumped the open-market counter 0 → 1.
+    assert_eq!(ctx.oracle(f.oracle).open_challenge_count, 1);
 
     ctx.warp(TWAP_WINDOW + 1); // cross market.twap_end
 
@@ -649,6 +678,11 @@ fn settle_fraud_disqualifies_and_resolves_fail_side() {
     assert_eq!(o.surviving_count, surviving_before - 1);
     assert_eq!(o.bond_pool, bond_pool_before + BOND);
     assert_eq!(o.phase, Phase::Challenge as u8, "phase stays Challenge");
+    // settle decremented the open-market counter 1 → 0.
+    assert_eq!(
+        o.open_challenge_count, 0,
+        "challenge settled, counter back to 0"
+    );
 
     let market: Market = ctx.read_pod(f.market);
     assert_eq!(market.settled, 1);
@@ -884,4 +918,54 @@ fn settle_last_block_swap_does_not_flip_outcome() {
     );
     let (n0, n1, _) = question_resolution(&ctx, f.m.question);
     assert_eq!((n0, n1), (1, 0), "pass-side: claim survived manipulation");
+}
+
+// NOTE on a stronger "crank-folded spike dilutes over the window" test (review
+// item 6): the precise diluted average depends on the exact slot deltas between
+// the honest cranks and the post-manipulation crank, plus the v0.4.2
+// `max_observation_change_per_update` clamp. Making the pass/fail margin land
+// deterministically on the survive side requires choreographing an honest window
+// many multiples of `ONE_MINUTE_IN_SLOTS` long against a single 150-slot spike
+// window — brittle against LiteSVM's slot accounting. The once-per-minute
+// observation gate (the realistic last-block attack) is covered deterministically
+// by `settle_last_block_swap_does_not_flip_outcome` above; the longer-window
+// dilution is a direct consequence of settle dividing the aggregator by the FULL
+// elapsed window in `verify_and_read_twap`, exercised by the honest/fraud tests.
+
+#[test]
+fn settle_uncranked_pass_pool_survives() {
+    // pass pool is NEVER cranked (pass_twap == 0) while the fail pool is cranked
+    // to a high price. A pass_twap of 0 means NO counter-trading on the pass side
+    // (design §7 → survive), so even with fail far above threshold the claim must
+    // SURVIVE — otherwise a challenger could crank only the fail pool to cheaply
+    // disqualify an honest proposer.
+    let (mut ctx, f) = fixture_with_attack(QUOTE_LOW, QUOTE_HIGH, AmmAttack::PassUncranked);
+    let surviving_before = ctx.oracle(f.oracle).surviving_count;
+    ctx.warp(TWAP_WINDOW + 1);
+
+    let ix = settle_ix(
+        &ctx,
+        f.oracle,
+        f.market,
+        f.ai_claim,
+        f.proposer,
+        f.m.question,
+        f.pass_amm,
+        f.fail_amm,
+        f.nonce,
+    );
+    ctx.send_many(&cu(ix), &[]).expect("settle should succeed");
+
+    let p = ctx.proposer(f.proposer);
+    assert_eq!(
+        p.disqualified, 0,
+        "pass_twap==0 must survive, not disqualify"
+    );
+    assert_eq!(p.slashed, 0);
+    let o = ctx.oracle(f.oracle);
+    assert_eq!(o.surviving_count, surviving_before, "no slash");
+    assert_eq!(o.open_challenge_count, 0);
+    assert_eq!(ctx.read_pod::<Market>(f.market).settled, 1);
+    let (n0, n1, _) = question_resolution(&ctx, f.m.question);
+    assert_eq!((n0, n1), (1, 0), "pass-side resolution");
 }

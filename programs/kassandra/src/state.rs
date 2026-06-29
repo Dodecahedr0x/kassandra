@@ -108,7 +108,14 @@ pub struct Oracle {
     pub settled_count: u16,      // facts settled so far (drives incremental finalize)
     pub ai_finalized_count: u16, // proposers ai-finalized so far (drives incremental finalize_ai_claims)
     pub bump: u8,
-    pub _pad1: [u8; 3],
+    pub _pad1: [u8; 1],
+    // Number of OPEN (created-but-not-yet-settled) challenge decision markets.
+    // `open_challenge` does `checked_add(1)` when it creates a Market;
+    // `settle_challenge` does `checked_sub(1)` when it sets `market.settled`.
+    // Task 12's `finalize_oracle` REQUIRES this == 0 before recomputing the
+    // final plurality, so an unsettled challenged proposer can never be wrongly
+    // counted as surviving. Fits in the former `_pad1` — Oracle::LEN stays 232.
+    pub open_challenge_count: u16,
     pub prompt_hash: [u8; 32], // hash of fixed prompt + interpretation
 }
 

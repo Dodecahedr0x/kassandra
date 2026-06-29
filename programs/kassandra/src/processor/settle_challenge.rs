@@ -96,33 +96,11 @@ use crate::{
 /// Exact payload length: `oracle_nonce[8]`.
 const PAYLOAD_LEN: usize = 8;
 
-/// Read a 32-byte pubkey out of `data` at byte `off`, or `InvalidAccount`.
-fn read_pubkey(data: &[u8], off: usize) -> Result<Pubkey, ProgramError> {
-    data.get(off..off + 32)
-        .and_then(|s| s.try_into().ok())
-        .ok_or_else(|| KassandraError::InvalidAccount.into())
-}
-
-/// Read a little-endian `u64` out of `data` at byte `off`, or `InvalidAccount`.
-fn read_u64(data: &[u8], off: usize) -> Result<u64, ProgramError> {
-    data.get(off..off + 8)
-        .and_then(|s| s.try_into().ok())
-        .map(u64::from_le_bytes)
-        .ok_or_else(|| KassandraError::InvalidAccount.into())
-}
-
-/// Read a little-endian `u128` out of `data` at byte `off`, or `InvalidAccount`.
-fn read_u128(data: &[u8], off: usize) -> Result<u128, ProgramError> {
-    data.get(off..off + 16)
-        .and_then(|s| s.try_into().ok())
-        .map(u128::from_le_bytes)
-        .ok_or_else(|| KassandraError::InvalidAccount.into())
-}
-
-/// Verify `amm` is owned by `AMM_ID` and bound to `(expected_base, expected_quote)`,
-/// then return its slot-weighted TWAP (`aggregator / slots_passed`, or `0` if the
-/// market never produced an observation). This is the hard binding the prompt
-/// requires: the AMM must be THIS market's pass/fail conditional pool.
+/// Verify `amm` is owned by `AMM_ID`, carries the `Amm` Anchor discriminator,
+/// and is bound to `(expected_base, expected_quote)`, then return its
+/// slot-weighted TWAP (`aggregator / slots_passed`, or `0` if the market never
+/// produced an observation). This is the hard binding the prompt requires: the
+/// AMM must be THIS market's pass/fail conditional pool.
 fn verify_and_read_twap(
     amm: &AccountInfo,
     expected_base: &Pubkey,
@@ -133,16 +111,21 @@ fn verify_and_read_twap(
     if data.len() < metadao::AMM_MIN_LEN {
         return Err(KassandraError::InvalidAccount.into());
     }
-    let base_mint = read_pubkey(&data, metadao::AMM_BASE_MINT_OFFSET)?;
-    let quote_mint = read_pubkey(&data, metadao::AMM_QUOTE_MINT_OFFSET)?;
+    // Defense-in-depth: the 8-byte Anchor account discriminator must be `Amm`'s
+    // (on top of the owner + conditional mint-pair binding below).
+    if data[..8] != metadao::AMM_ACCOUNT_DISCRIMINATOR {
+        return Err(KassandraError::InvalidAccount.into());
+    }
+    let base_mint = metadao::read_pubkey(&data, metadao::AMM_BASE_MINT_OFFSET)?;
+    let quote_mint = metadao::read_pubkey(&data, metadao::AMM_QUOTE_MINT_OFFSET)?;
     if &base_mint != expected_base || &quote_mint != expected_quote {
         return Err(KassandraError::InvalidAccount.into());
     }
 
-    let created_at = read_u64(&data, metadao::AMM_CREATED_AT_SLOT_OFFSET)?;
-    let last_updated = read_u64(&data, metadao::AMM_LAST_UPDATED_SLOT_OFFSET)?;
-    let aggregator = read_u128(&data, metadao::AMM_AGGREGATOR_OFFSET)?;
-    let start_delay = read_u64(&data, metadao::AMM_START_DELAY_SLOTS_OFFSET)?;
+    let created_at = metadao::read_u64(&data, metadao::AMM_CREATED_AT_SLOT_OFFSET)?;
+    let last_updated = metadao::read_u64(&data, metadao::AMM_LAST_UPDATED_SLOT_OFFSET)?;
+    let aggregator = metadao::read_u128(&data, metadao::AMM_AGGREGATOR_OFFSET)?;
+    let start_delay = metadao::read_u64(&data, metadao::AMM_START_DELAY_SLOTS_OFFSET)?;
 
     // Mirror the v0.4.2 AMM `get_twap()`:
     //   aggregator / (last_updated - (created_at + start_delay_slots)).
@@ -238,13 +221,23 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     }
 
     // --- slash trigger (u128): fail_twap * DEN > pass_twap * (DEN + NUM) -----
-    let lhs = fail_twap
-        .checked_mul(MARKET_THRESHOLD_DEN)
-        .ok_or(ProgramError::ArithmeticOverflow)?;
-    let rhs = pass_twap
-        .checked_mul(MARKET_THRESHOLD_DEN + MARKET_THRESHOLD_NUM)
-        .ok_or(ProgramError::ArithmeticOverflow)?;
-    let disqualify = lhs > rhs;
+    // GUARD: `pass_twap == 0` ALWAYS survives. A zero pass TWAP means the pass
+    // pool has no observation — i.e. NO counter-trading on the pass side — which
+    // design §7 defines as "claim survives". Without this guard a challenger
+    // could crank ONLY the fail pool (leaving pass un-cranked at 0) and cheaply
+    // flip `fail_twap*DEN > 0` true to disqualify an honest proposer. So a
+    // disqualification requires a real, non-zero pass price to beat.
+    let disqualify = if pass_twap == 0 {
+        false
+    } else {
+        let lhs = fail_twap
+            .checked_mul(MARKET_THRESHOLD_DEN)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+        let rhs = pass_twap
+            .checked_mul(MARKET_THRESHOLD_DEN + MARKET_THRESHOLD_NUM)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+        lhs > rhs
+    };
 
     // PASS-side [1,0] survives, FAIL-side [0,1] disqualifies.
     let numerators: [u32; 2] = if disqualify { [0, 1] } else { [1, 0] };
@@ -299,6 +292,12 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
 
     // --- persist (oracle, proposer, market) ---------------------------------
     market.settled = 1;
+    // One fewer OPEN challenge market. Task 12 gates final plurality recompute
+    // on this reaching 0, so every challenged proposer is settled first.
+    oracle.open_challenge_count = oracle
+        .open_challenge_count
+        .checked_sub(1)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
     {
         let mut data = market_ai.try_borrow_mut_data()?;
         data[..Market::LEN].copy_from_slice(bytemuck::bytes_of(&market));

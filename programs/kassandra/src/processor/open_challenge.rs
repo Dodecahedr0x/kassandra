@@ -38,13 +38,15 @@
 //!   `underlying_token_mint:Pubkey` @40, `underlying_token_account:Pubkey` @72,
 //!   `conditional_token_mints: Vec<Pubkey>` @104.
 //!
-//! # AMM binding (DEFERRED, documented)
-//! The standalone MetaDAO `amm` v0.4 (`AMMyu…`) was migrated out of the current
-//! futarchy source tree (to Meteora DAMM v2), so its account layout is not
-//! re-derivable from `main`. We therefore verify only that `pass_amm`/`fail_amm`
-//! are **owned by the AMM program** (the strongest binding we can make without a
-//! reliable layout). Binding each AMM to its specific pass/fail conditional KASS
-//! and USDC mints is left to Task 11, where the TWAP read accounts pin them.
+//! # AMM binding (here: owner-only; full mint-pair binding in `settle_challenge`)
+//! At open time we verify only that `pass_amm`/`fail_amm` are **owned by the AMM
+//! program** and record their addresses on the `Market`. The HARD binding — each
+//! AMM's `base_mint`/`quote_mint` must equal this market's pass/fail conditional
+//! (KASS, USDC) mints, `pass_amm != fail_amm`, and the `Amm` account
+//! discriminator — is enforced in `settle_challenge`, which reads the (now
+//! pinned, delayed-twap v0.4.2) `Amm` layout when it consumes the TWAP. Recording
+//! the addresses here and binding them there is safe: the recorded address can
+//! only resolve to a pool bound to this market's mints, else settle rejects it.
 //!
 //! # Accounts
 //! 0.  oracle              — writable, owned by this program; also the split
@@ -96,21 +98,6 @@ use crate::{
 /// Exact payload length: challenger_usdc[8] ++ oracle_nonce[8].
 const PAYLOAD_LEN: usize = 16;
 
-/// Read a 32-byte pubkey out of `data` at byte `off`, or `InvalidAccount`.
-fn read_pubkey(data: &[u8], off: usize) -> Result<Pubkey, ProgramError> {
-    data.get(off..off + 32)
-        .and_then(|s| s.try_into().ok())
-        .ok_or_else(|| KassandraError::InvalidAccount.into())
-}
-
-/// Read a little-endian `u32` out of `data` at byte `off`, or `InvalidAccount`.
-fn read_u32(data: &[u8], off: usize) -> Result<u32, ProgramError> {
-    data.get(off..off + 4)
-        .and_then(|s| s.try_into().ok())
-        .map(u32::from_le_bytes)
-        .ok_or_else(|| KassandraError::InvalidAccount.into())
-}
-
 /// Minimum size of an SPL token account (`spl_token::state::Account::LEN`).
 const SPL_TOKEN_ACCOUNT_LEN: usize = 165;
 /// `spl_token::state::Account.mint` byte offset.
@@ -136,8 +123,8 @@ fn assert_oracle_owned_token(
     if data.len() < SPL_TOKEN_ACCOUNT_LEN {
         return Err(KassandraError::InvalidAccount.into());
     }
-    let mint = read_pubkey(&data, SPL_TOKEN_MINT_OFFSET)?;
-    let owner = read_pubkey(&data, SPL_TOKEN_OWNER_OFFSET)?;
+    let mint = metadao::read_pubkey(&data, SPL_TOKEN_MINT_OFFSET)?;
+    let owner = metadao::read_pubkey(&data, SPL_TOKEN_OWNER_OFFSET)?;
     if &mint != expected_mint || &owner != oracle_key {
         return Err(KassandraError::InvalidAccount.into());
     }
@@ -164,7 +151,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     assert_key(system_prog_ai, &pinocchio_system::ID)?;
 
     // --- oracle + phase / window gates -------------------------------------
-    let oracle: Oracle = load_oracle(oracle_ai, program_id)?;
+    let mut oracle: Oracle = load_oracle(oracle_ai, program_id)?;
     require_phase(&oracle, Phase::Challenge)?;
     let now = now()?;
     require_before_end(&oracle, now)?;
@@ -207,11 +194,11 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     assert_owned_by_program(question_ai, &metadao::CONDITIONAL_VAULT_ID)?;
     {
         let data = question_ai.try_borrow_data()?;
-        let q_oracle = read_pubkey(&data, metadao::QUESTION_ORACLE_OFFSET)?;
+        let q_oracle = metadao::read_pubkey(&data, metadao::QUESTION_ORACLE_OFFSET)?;
         if &q_oracle != oracle_ai.key() {
             return Err(KassandraError::InvalidAccount.into());
         }
-        let num_outcomes = read_u32(&data, metadao::QUESTION_NUM_OUTCOMES_LEN_OFFSET)?;
+        let num_outcomes = metadao::read_u32(&data, metadao::QUESTION_NUM_OUTCOMES_LEN_OFFSET)?;
         if num_outcomes != 2 {
             return Err(KassandraError::InvalidAccount.into());
         }
@@ -221,9 +208,10 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     assert_owned_by_program(kass_vault_ai, &metadao::CONDITIONAL_VAULT_ID)?;
     {
         let data = kass_vault_ai.try_borrow_data()?;
-        let v_question = read_pubkey(&data, metadao::VAULT_QUESTION_OFFSET)?;
-        let v_underlying = read_pubkey(&data, metadao::VAULT_UNDERLYING_MINT_OFFSET)?;
-        let v_underlying_acct = read_pubkey(&data, metadao::VAULT_UNDERLYING_ACCOUNT_OFFSET)?;
+        let v_question = metadao::read_pubkey(&data, metadao::VAULT_QUESTION_OFFSET)?;
+        let v_underlying = metadao::read_pubkey(&data, metadao::VAULT_UNDERLYING_MINT_OFFSET)?;
+        let v_underlying_acct =
+            metadao::read_pubkey(&data, metadao::VAULT_UNDERLYING_ACCOUNT_OFFSET)?;
         if &v_question != question_ai.key()
             || v_underlying != oracle.kass_mint
             || &v_underlying_acct != kass_vault_underlying_ai.key()
@@ -236,8 +224,8 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     assert_owned_by_program(usdc_vault_ai, &metadao::CONDITIONAL_VAULT_ID)?;
     {
         let data = usdc_vault_ai.try_borrow_data()?;
-        let v_question = read_pubkey(&data, metadao::VAULT_QUESTION_OFFSET)?;
-        let v_underlying = read_pubkey(&data, metadao::VAULT_UNDERLYING_MINT_OFFSET)?;
+        let v_question = metadao::read_pubkey(&data, metadao::VAULT_QUESTION_OFFSET)?;
+        let v_underlying = metadao::read_pubkey(&data, metadao::VAULT_UNDERLYING_MINT_OFFSET)?;
         if &v_question != question_ai.key() || v_underlying != oracle.usdc_mint {
             return Err(KassandraError::InvalidAccount.into());
         }
@@ -374,6 +362,19 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     {
         let mut data = ai_claim_ai.try_borrow_mut_data()?;
         data[..crate::state::AiClaim::LEN].copy_from_slice(bytemuck::bytes_of(&ai_claim));
+    }
+
+    // --- track the open challenge -------------------------------------------
+    // One more market is now OPEN (not yet settled). `settle_challenge`
+    // decrements this; Task 12 requires it == 0 before final plurality recompute
+    // so an unsettled challenged proposer is never counted as surviving.
+    oracle.open_challenge_count = oracle
+        .open_challenge_count
+        .checked_add(1)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+    {
+        let mut data = oracle_ai.try_borrow_mut_data()?;
+        data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
     }
 
     Ok(())
