@@ -37,6 +37,12 @@ pub enum Ix {
     /// the oracle's stake vault, creating one `Proposer` PDA per (oracle,
     /// authority). Enforces the `MAX_PROPOSERS` cap on-chain.
     Propose = 11,
+    /// At the proposal-window end, finalize an oracle in
+    /// [`crate::state::Phase::Proposal`]: if every proposer agrees, resolve it
+    /// ([`crate::state::Phase::Resolved`] + `resolved_option`); if any conflict,
+    /// open the dispute by setting `dispute_bond_total = total_oracle_stake` and
+    /// advancing to [`crate::state::Phase::FactProposal`] (the dispute-core seam).
+    FinalizeProposals = 12,
     // Future variants are APPENDED here with the next discriminant; add a
     // matching arm to `from_u8` below.
 }
@@ -58,6 +64,7 @@ impl Ix {
             9 => Some(Ix::InitProtocol),
             10 => Some(Ix::CreateOracle),
             11 => Some(Ix::Propose),
+            12 => Some(Ix::FinalizeProposals),
             _ => None,
         }
     }

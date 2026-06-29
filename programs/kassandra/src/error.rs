@@ -90,6 +90,10 @@ pub enum KassandraError {
     /// this oracle (the Proposer PDA is already initialized): one proposal per
     /// (oracle, authority).
     DuplicateProposer = 23,
+    /// `finalize_proposals` was called on an oracle with `proposer_count == 0`:
+    /// there is nothing to finalize, and an empty oracle stays open waiting for
+    /// its first proposal (the empty-window seeding handled by `propose`).
+    NoProposals = 24,
 }
 
 impl From<KassandraError> for ProgramError {

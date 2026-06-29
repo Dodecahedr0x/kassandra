@@ -367,6 +367,22 @@ impl TestCtx {
         }
     }
 
+    /// Build a `FinalizeProposals` instruction: `[0] oracle(w)` followed by the
+    /// given proposer accounts as a READ-ONLY tail. Exposes the full proposer
+    /// slice so tests can pass a subset, a duplicate, or a foreign-oracle account.
+    pub fn finalize_proposals_ix(&self, oracle: Pubkey, proposers: &[Pubkey]) -> Instruction {
+        let mut accounts = Vec::with_capacity(1 + proposers.len());
+        accounts.push(AccountMeta::new(oracle, false));
+        for p in proposers {
+            accounts.push(AccountMeta::new_readonly(*p, false));
+        }
+        Instruction {
+            program_id: self.program_id,
+            accounts,
+            data: vec![kassandra_program::instruction::Ix::FinalizeProposals as u8],
+        }
+    }
+
     // ----- seeding -----------------------------------------------------------
 
     /// Fabricate an oracle already in [`Phase::FactProposal`] with one proposer
