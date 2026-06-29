@@ -99,6 +99,16 @@ pub enum KassandraError {
     /// `dao_authority`: the admin→DAO handoff is one-shot, and only the DAO may
     /// rotate the linkage thereafter.
     GovernanceAlreadySet = 25,
+    /// `set_config` was given an out-of-bounds governable parameter: a zero
+    /// denominator (`threshold_den` / `market_threshold_den` / `flip_slash_den`
+    /// / `fact_vote_slash_den` / `emission_den`), a fraction numerator that
+    /// exceeds its denominator (`threshold`, `flip_slash`, `fact_vote_slash`,
+    /// `emission`, `market_threshold`), a non-positive window
+    /// (`phase_window` / `proposal_window` / `fee_ema_halflife`), or both reward
+    /// weights zero. Rejecting these at the gate prevents a later
+    /// divide-by-zero / nonsensical config on the create_oracle / settlement
+    /// paths.
+    InvalidConfig = 26,
 }
 
 impl From<KassandraError> for ProgramError {

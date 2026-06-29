@@ -34,6 +34,22 @@ pub fn assert_signer(account: &AccountInfo) -> ProgramResult {
     Ok(())
 }
 
+/// Require that `signer_ai` BOTH signed the transaction AND is the protocol's
+/// recorded `dao_authority` (the Squads v4 multisig vault PDA), else
+/// [`KassandraError::Unauthorized`]. This is the shared gate for the privileged
+/// governance instructions (`set_config` (F3), `resolve_deadend` (F4)): a passed
+/// v0.6 futarchy proposal executes through the Squads vault, which signs as this
+/// `dao_authority`. Before `set_governance` records it, `dao_authority` is zero,
+/// so no real signer matches and the gate denies (no separate "unset" check
+/// needed).
+pub fn assert_dao_authority(protocol: &Protocol, signer_ai: &AccountInfo) -> ProgramResult {
+    assert_signer(signer_ai)?;
+    if signer_ai.key() != &protocol.dao_authority {
+        return Err(KassandraError::Unauthorized.into());
+    }
+    Ok(())
+}
+
 /// Require that `account`'s key equals `expected`, else
 /// [`KassandraError::InvalidAccount`]. Used to pin sysvar/program ids and
 /// stored references (e.g. `oracle.stake_vault`).

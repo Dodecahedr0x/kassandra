@@ -198,3 +198,30 @@ Behavior-preserving: the snapshot defaults == the current `config.rs` consts, so
 **Test harness:** `tests/common/mod.rs::seed_disputed_oracle` (which fabricates oracles directly, bypassing `create_oracle`) now sets the 8 active snapshot fields to the config consts, so a fabricated oracle behaves identically to a real one (else zeroed denominators would divide-by-zero / change behavior). Grep confirms no remaining `config::{THRESHOLD,MARKET_THRESHOLD,FLIP_SLASH,PHASE_WINDOW,PROPOSAL_WINDOW}` reads in processor active paths (only doc-comments + the `init_protocol` default source remain).
 
 Build: `just build` (SBF) clean. Tests: `cargo test -p kassandra-program` all pass UNCHANGED. `cargo clippy --all-targets` clean; `cargo fmt` applied.
+
+### F3 — `set_config` (dao-gated, bounds-checked) (DONE 2026-06-29)
+
+No layout change (Protocol/Oracle untouched; `state_layout.rs` unchanged). Wholesale overwrite of the `Protocol`-resident governable config; existing oracles' snapshots stay frozen.
+
+**`Ix::SetConfig = 14`** (appended; `from_u8` arm added; dispatched in `processor/mod.rs`). New processor `processor/set_config.rs`. **Error appended:** `KassandraError::InvalidConfig = 26`.
+
+**Shared guard (`processor/guards.rs`):** `assert_dao_authority(protocol: &Protocol, signer_ai: &AccountInfo) -> ProgramResult` — `assert_signer(signer_ai)` AND `signer_ai.key() == &protocol.dao_authority` else `Unauthorized`. Before `set_governance`, `dao_authority` is zero so no real signer matches (no separate "unset" check). Used by `set_config`. NOT folded into `set_governance`'s post-handoff rotation check: that check returns `GovernanceAlreadySet` (not `Unauthorized`), so the helper doesn't apply cleanly — left as-is.
+
+**Accounts:** `[0] protocol(w)`, `[1] dao_authority(signer)`.
+
+**Payload — fixed 144 bytes = 18 × 8-byte LE fields, in order:** `emission_num u64`, `emission_den u64`, `total_supply_cap u64`, `fee_ema_halflife i64`, `fee_per_ema_unit u64`, `fee_ema_increment u64`, `threshold_num u64`, `threshold_den u64`, `market_threshold_num u64`, `market_threshold_den u64`, `flip_slash_num u64`, `flip_slash_den u64`, `phase_window i64`, `proposal_window i64`, `fact_vote_slash_num u64`, `fact_vote_slash_den u64`, `reward_proposer_weight u64`, `reward_fact_weight u64`. Overwrites exactly those 18 Protocol fields; does NOT touch `account_type`/`admin`/`kass_mint`/`usdc_mint`/`fee_ema`/`last_creation_unix`/`bump`/`governance_set`/`dao_authority`/`kass_dao`.
+
+**Bounds (reject `InvalidConfig`):**
+- Denominators `> 0`: `threshold_den`, `market_threshold_den`, `flip_slash_den`, `fact_vote_slash_den`, `emission_den`.
+- Fraction numerators `<= ` their denominator: `threshold`, `flip_slash`, `fact_vote_slash`, `emission`, `market_threshold`. **`market_threshold <= 1` is a deliberate choice** — it is a RELATIVE margin (`fail > pass*(1+num/den)`), so `num <= den` caps the margin at +100%; a wider margin is economically absurd for honest-vs-fraud, and the check is the only thing requiring `num <= den` (the `fail*den > pass*(den+num)` math itself doesn't). Relax this one line if a future design ever needs a >100% margin.
+- Windows `> 0`: `phase_window`, `proposal_window`, `fee_ema_halflife` (the fee-EMA decay divisor).
+- At least one reward weight `> 0` (settlement split denominator `pw + fw` never zero). NOTE: `init_protocol` defaults BOTH reward weights to 0 (the reserved/unset baseline), so `set_config` is stricter than init here — an explicit governance retune must set at least one.
+- No bound on `total_supply_cap`/`fee_per_ema_unit`/`fee_ema_increment` (0 is meaningful).
+
+**Snapshot semantics confirmed by tests:** a `set_config` after an oracle exists does NOT change that oracle's frozen snapshot (in-flight goalposts don't move); an oracle created AFTER `set_config` snapshots the new values.
+
+**Harness reserved-field fix (`tests/common/mod.rs`):** `seed_disputed_oracle` now also sets the 4 reserved snapshot fields (`fact_vote_slash_num=0`, `fact_vote_slash_den=1`, `reward_proposer_weight=0`, `reward_fact_weight=0`) — the same defaults `init_protocol`/`create_oracle` use — so fabricated oracles don't carry `fact_vote_slash_den=0` (a future settlement-era divide-by-zero). Added `ConfigParams` (18-field struct + `defaults()` valid baseline + `to_payload()` 144-byte packer) and `set_config`/`set_config_ix` helpers. `defaults()` mirrors init defaults EXCEPT reward weights = 1/1 (init's 0/0 would fail the at-least-one-positive bound).
+
+**Tests (`tests/set_config.rs`, 7, all green):** (1) dao sets config → Protocol updated + new oracle snapshots new values; (2) non-dao signer → `Unauthorized`; (3) zero denominator (`threshold_den=0`, `flip_slash_den=0`) → `InvalidConfig`; (4) fraction >1 (`flip_slash_num>flip_slash_den`) → `InvalidConfig`; (5) zero window (`phase_window=0`) → `InvalidConfig`; (6) both reward weights zero → `InvalidConfig`; (7) in-flight oracle snapshot unchanged after `set_config`.
+
+Build: `just build` (SBF) clean. Tests: `cargo test -p kassandra-program` all pass. `cargo clippy --all-targets` clean; `cargo fmt` applied.

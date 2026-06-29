@@ -106,6 +106,89 @@ pub struct SeededOracle {
     pub proposers: Vec<SeededProposer>,
 }
 
+/// The full set of `Protocol`-resident governable params for `set_config`
+/// (Task F3), in the fixed wire order. [`ConfigParams::defaults`] returns a
+/// VALID baseline (passes every bound); tests mutate one field to drive the
+/// `InvalidConfig` rejection paths.
+#[derive(Clone, Copy, Debug)]
+pub struct ConfigParams {
+    pub emission_num: u64,
+    pub emission_den: u64,
+    pub total_supply_cap: u64,
+    pub fee_ema_halflife: i64,
+    pub fee_per_ema_unit: u64,
+    pub fee_ema_increment: u64,
+    pub threshold_num: u64,
+    pub threshold_den: u64,
+    pub market_threshold_num: u64,
+    pub market_threshold_den: u64,
+    pub flip_slash_num: u64,
+    pub flip_slash_den: u64,
+    pub phase_window: i64,
+    pub proposal_window: i64,
+    pub fact_vote_slash_num: u64,
+    pub fact_vote_slash_den: u64,
+    pub reward_proposer_weight: u64,
+    pub reward_fact_weight: u64,
+}
+
+impl ConfigParams {
+    /// A VALID baseline mirroring `init_protocol`'s defaults, except the reward
+    /// weights are set to 1/1 (init defaults both to 0, but `set_config`
+    /// requires at least one reward weight > 0). Tests start here and mutate.
+    pub fn defaults() -> Self {
+        Self {
+            emission_num: 0,
+            emission_den: 1,
+            total_supply_cap: 0,
+            fee_ema_halflife: kassandra_program::config::FEE_EMA_HALFLIFE_SECS,
+            fee_per_ema_unit: kassandra_program::config::FEE_PER_EMA_UNIT,
+            fee_ema_increment: kassandra_program::config::FEE_EMA_INCREMENT,
+            threshold_num: THRESHOLD_NUM,
+            threshold_den: THRESHOLD_DEN,
+            market_threshold_num: MARKET_THRESHOLD_NUM as u64,
+            market_threshold_den: MARKET_THRESHOLD_DEN as u64,
+            flip_slash_num: FLIP_SLASH_NUM,
+            flip_slash_den: FLIP_SLASH_DEN,
+            phase_window: PHASE_WINDOW,
+            proposal_window: PROPOSAL_WINDOW,
+            fact_vote_slash_num: 0,
+            fact_vote_slash_den: 1,
+            reward_proposer_weight: 1,
+            reward_fact_weight: 1,
+        }
+    }
+
+    /// Pack into the fixed 144-byte little-endian wire layout `set_config` expects.
+    pub fn to_payload(self) -> [u8; 144] {
+        let mut out = [0u8; 144];
+        let fields: [[u8; 8]; 18] = [
+            self.emission_num.to_le_bytes(),
+            self.emission_den.to_le_bytes(),
+            self.total_supply_cap.to_le_bytes(),
+            self.fee_ema_halflife.to_le_bytes(),
+            self.fee_per_ema_unit.to_le_bytes(),
+            self.fee_ema_increment.to_le_bytes(),
+            self.threshold_num.to_le_bytes(),
+            self.threshold_den.to_le_bytes(),
+            self.market_threshold_num.to_le_bytes(),
+            self.market_threshold_den.to_le_bytes(),
+            self.flip_slash_num.to_le_bytes(),
+            self.flip_slash_den.to_le_bytes(),
+            self.phase_window.to_le_bytes(),
+            self.proposal_window.to_le_bytes(),
+            self.fact_vote_slash_num.to_le_bytes(),
+            self.fact_vote_slash_den.to_le_bytes(),
+            self.reward_proposer_weight.to_le_bytes(),
+            self.reward_fact_weight.to_le_bytes(),
+        ];
+        for (i, f) in fields.iter().enumerate() {
+            out[i * 8..i * 8 + 8].copy_from_slice(f);
+        }
+        out
+    }
+}
+
 /// LiteSVM-backed test context with KASS/USDC mints and helpers for seeding
 /// disputed oracles directly into account storage.
 pub struct TestCtx {
@@ -286,6 +369,48 @@ impl TestCtx {
         data.push(kassandra_program::instruction::Ix::SetGovernance as u8);
         data.extend_from_slice(&dao_authority.to_bytes());
         data.extend_from_slice(&kass_dao.to_bytes());
+        Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                AccountMeta::new(protocol, false),
+                AccountMeta::new_readonly(authority, true),
+            ],
+            data,
+        }
+    }
+
+    /// Send a real `SetConfig` instruction signed by `authority`, overwriting
+    /// the `Protocol`-resident governable params with `params`. Returns the
+    /// Protocol PDA + result so tests can assert success / the
+    /// `Unauthorized` / `InvalidConfig` rejection paths. `set_governance` must
+    /// have recorded `authority` as the `dao_authority` first.
+    #[allow(clippy::result_large_err)]
+    pub fn set_config(
+        &mut self,
+        authority: &Keypair,
+        params: ConfigParams,
+    ) -> (Pubkey, TransactionResult) {
+        let (protocol_pda, _) = Self::protocol_pda(&self.program_id);
+        let ix = self.set_config_ix(protocol_pda, authority.pubkey(), params);
+        let res = if authority.pubkey() == self.payer.pubkey() {
+            self.send(ix, &[])
+        } else {
+            self.send(ix, &[authority])
+        };
+        (protocol_pda, res)
+    }
+
+    /// Build a `SetConfig` instruction. Exposes `protocol`/`authority` so tests
+    /// can pass a wrong signer. Payload = the 144-byte packed `ConfigParams`.
+    pub fn set_config_ix(
+        &self,
+        protocol: Pubkey,
+        authority: Pubkey,
+        params: ConfigParams,
+    ) -> Instruction {
+        let mut data = Vec::with_capacity(1 + 144);
+        data.push(kassandra_program::instruction::Ix::SetConfig as u8);
+        data.extend_from_slice(&params.to_payload());
         Instruction {
             program_id: self.program_id,
             accounts: vec![
@@ -625,6 +750,14 @@ impl TestCtx {
         oracle.flip_slash_den = FLIP_SLASH_DEN;
         oracle.phase_window = PHASE_WINDOW;
         oracle.proposal_window = PROPOSAL_WINDOW;
+        // Reserved (settlement-era) snapshot fields, defaulted exactly as
+        // `init_protocol`/`create_oracle` do (denominator never zero), so a
+        // fabricated oracle doesn't carry `fact_vote_slash_den == 0` that a
+        // future settlement-era reader would divide by.
+        oracle.fact_vote_slash_num = 0;
+        oracle.fact_vote_slash_den = 1;
+        oracle.reward_proposer_weight = 0;
+        oracle.reward_fact_weight = 0;
         self.set_program_account(oracle_pda, bytemuck::bytes_of(&oracle).to_vec());
 
         // Build and write each Proposer account.

@@ -22,6 +22,7 @@ pub mod guards;
 pub mod init_protocol;
 pub mod open_challenge;
 pub mod propose;
+pub mod set_config;
 pub mod set_governance;
 pub mod settle_challenge;
 pub mod submit_ai_claim;
@@ -50,5 +51,6 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
         Ix::Propose => propose::process(program_id, accounts, payload),
         Ix::FinalizeProposals => finalize_proposals::process(program_id, accounts, payload),
         Ix::SetGovernance => set_governance::process(program_id, accounts, payload),
+        Ix::SetConfig => set_config::process(program_id, accounts, payload),
     }
 }

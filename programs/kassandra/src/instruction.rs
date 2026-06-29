@@ -49,6 +49,12 @@ pub enum Ix {
     /// 0`; once set, only the current `dao_authority` may rotate it (so
     /// governance can rotate itself after handoff).
     SetGovernance = 13,
+    /// DAO-gated retune of the `Protocol`-resident governable params (Task F3):
+    /// overwrites the monetary + behavioral config fields wholesale from a
+    /// fixed 144-byte payload, bounds-checked. Gated to `Protocol.dao_authority`
+    /// (signer). Does NOT touch existing oracles (their snapshots are frozen);
+    /// subsequently-created oracles snapshot the new values.
+    SetConfig = 14,
     // Future variants are APPENDED here with the next discriminant; add a
     // matching arm to `from_u8` below.
 }
@@ -72,6 +78,7 @@ impl Ix {
             11 => Some(Ix::Propose),
             12 => Some(Ix::FinalizeProposals),
             13 => Some(Ix::SetGovernance),
+            14 => Some(Ix::SetConfig),
             _ => None,
         }
     }
