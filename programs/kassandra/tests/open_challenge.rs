@@ -357,6 +357,10 @@ struct Fixture {
 }
 
 fn fixture() -> (TestCtx, Fixture) {
+    fixture_with_bond(1_000_000_000)
+}
+
+fn fixture_with_bond(bond0: u64) -> (TestCtx, Fixture) {
     let mut ctx = TestCtx::new();
     ctx.svm.add_program(vault_id(), VAULT_SO);
     ctx.svm.add_program(amm_id(), AMM_SO);
@@ -368,7 +372,7 @@ fn fixture() -> (TestCtx, Fixture) {
     let oracle = ctx.seed_disputed_oracle(&[
         ProposerSpec {
             option: 0,
-            bond: 1_000_000_000,
+            bond: bond0,
         },
         ProposerSpec {
             option: 1,
@@ -533,6 +537,49 @@ fn open_challenge_insufficient_usdc_fails() {
     assert!(
         ctx.svm.get_account(&f.market).is_none(),
         "failed escrow must not leave a Market account"
+    );
+    assert_eq!(ctx.ai_claim(f.ai_claim).challenged, 0);
+}
+
+#[test]
+fn open_challenge_zero_escrow_fails() {
+    // A sub-micro bond (1 base unit) prices to `1 × 5e8 / 1e12 == 0` USDC escrow.
+    // A zero-escrow challenge has no skin-in-the-game and no source for the
+    // directional USDC fee at settle, so open_challenge must reject it (ZeroStake)
+    // BEFORE moving any funds — no Market, no challenged flip.
+    let (mut ctx, f) = fixture_with_bond(1);
+    assert_eq!(
+        required_escrow_usdc(f.bond),
+        0,
+        "sanity: escrow truncates to 0"
+    );
+
+    let ix = open_challenge_ix(
+        &ctx,
+        f.oracle,
+        f.ai_claim,
+        f.proposer,
+        f.market,
+        f.challenger.pubkey(),
+        &f.m,
+        f.stake_vault,
+        f.oracle_pass_kass,
+        f.oracle_fail_kass,
+        f.kass_dao,
+        f.challenger_usdc_src,
+        f.nonce,
+    );
+    let err = ctx.send_many(&cu(ix), &[&f.challenger]).unwrap_err().err;
+    assert_eq!(
+        err,
+        TransactionError::InstructionError(
+            1,
+            InstructionError::Custom(KassandraError::ZeroStake as u32),
+        ),
+    );
+    assert!(
+        ctx.svm.get_account(&f.market).is_none(),
+        "zero-escrow reject must not leave a Market account"
     );
     assert_eq!(ctx.ai_claim(f.ai_claim).challenged, 0);
 }

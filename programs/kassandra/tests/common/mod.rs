@@ -1007,6 +1007,27 @@ impl TestCtx {
         self.set_program_account(oracle, bytemuck::bytes_of(&o).to_vec());
     }
 
+    /// Overwrite a seeded oracle's directional challenge-fee snapshot (the same
+    /// fields `create_oracle` snapshots from `Protocol` and `set_config` retunes).
+    /// Lets `settle_challenge` tests prove the fee is read from the per-oracle
+    /// snapshot — i.e. a governance fee change flows into a new challenge's settle
+    /// — without driving the full real create/propose/finalize/challenge flow.
+    pub fn set_challenge_fees(
+        &mut self,
+        oracle: Pubkey,
+        fail_usdc_num: u64,
+        fail_usdc_den: u64,
+        success_kass_num: u64,
+        success_kass_den: u64,
+    ) {
+        let mut o = self.oracle(oracle);
+        o.challenge_fail_usdc_fee_num = fail_usdc_num;
+        o.challenge_fail_usdc_fee_den = fail_usdc_den;
+        o.challenge_success_kass_fee_num = success_kass_num;
+        o.challenge_success_kass_fee_den = success_kass_den;
+        self.set_program_account(oracle, bytemuck::bytes_of(&o).to_vec());
+    }
+
     /// Fabricate a program-owned account at a fresh address holding `data`.
     /// Used by type-confusion tests to stand up an account with a wrong (or
     /// missing) `account_type` tag.

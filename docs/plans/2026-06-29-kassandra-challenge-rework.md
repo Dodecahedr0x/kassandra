@@ -149,3 +149,81 @@ Payload dropped the legacy `challenger_usdc` field (compute-on-chain is cleaner)
 - `set_config.rs`: default-fee snapshot, fee update + new-oracle snapshot, and
   den==0 / num>den rejection.
 - C2 (settle-side fee routing / redeem) intentionally NOT implemented here.
+
+---
+
+## C2 delta log — settle_challenge physical redeem + directional fees (DONE)
+
+### redeem_tokens CPI (validated against the real v0.4 binary)
+- `redeem_tokens` (disc `f6 62 86 29 98 21 78 45`, NO args) uses the SAME
+  `InteractWithVault` account struct as `split_tokens` — VERIFIED against the
+  deployed v0.4 `conditional_vault` source (`instructions/common.rs` +
+  `redeem_tokens.rs` fetched at tag `v0.4`). It is gated by
+  `question.is_resolved()`, burns the holder's FULL balance of EVERY outcome's
+  conditional token, and transfers `Σ_i balance_i × payout_numerators[i] /
+  payout_denominator` underlying out. For binary pass-wins `[1,0]`: pass redeems
+  1:1, fail → 0; fail-wins `[0,1]` symmetric. The bond was split into BOTH legs
+  at open and never traded, so the redeem is CLEAN → the FULL `bond` KASS lands in
+  `stake_vault`. New encoder `metadao::redeem_tokens_data() -> [u8;8]`.
+- Account order (program-signed by the oracle PDA): `0 question(ro) · 1
+  kass_vault(w) · 2 kass_vault_underlying(w) · 3 authority=oracle PDA(signer) · 4
+  stake_vault(w, user_underlying) · 5 token_program · 6 cv_event_auth · 7
+  cv_program · 8 pass_kass_mint(w) · 9 fail_kass_mint(w) · 10 oracle_pass_kass(w) ·
+  11 oracle_fail_kass(w)`. `user_underlying` (stake_vault) + the conditional
+  holders are all owned by the oracle PDA (the InteractWithVault
+  `token::authority = authority` constraint), so the redeemed KASS lands in
+  stake_vault. DRIVEN end-to-end against the real binary for BOTH outcomes (the
+  one piece the recon flagged as not-yet-driven is now driven).
+
+### Fee routing (both outcomes)
+- **Survives (pass-win, challenge FAILED):** `usdc_fee = challenger_usdc ×
+  challenge_fail_usdc_fee_num/den` → PROPOSER's USDC account; `challenger_usdc −
+  usdc_fee` → CHALLENGER's USDC account (both from the escrow vault, oracle-PDA
+  signed). Bond stays the proposer's (redeemed into stake_vault). USDC
+  conservation: `usdc_fee + return == challenger_usdc`, exactly.
+- **Disqualified (fail-win, challenge SUCCEEDED):** `kass_fee = bond ×
+  challenge_success_kass_fee_num/den` KASS from stake_vault → CHALLENGER's KASS
+  account; the FULL `challenger_usdc` escrow → CHALLENGER's USDC account (no
+  proposer USDC fee). Fee rates read from the per-ORACLE snapshot (governable).
+
+### slashed_amount / bond_pool adjustment (the carve-out)
+- The disqualify block now slashes `net_slash = bond − kass_fee` (not the full
+  bond): `delta = net_slash − already_slashed`, `slashed_amount = net_slash`,
+  `bond_pool += delta`. The per-proposer identity `slashed_amount == bond_pool
+  contribution` HOLDS with the carve-out; `kass_fee` physically leaves stake_vault
+  to the challenger. KASS conservation becomes `stake_vault + kass_vault_underlying
+  + kass_fee == total_oracle_stake` on disqualify (the original
+  `stake_vault + underlying == total` still holds on survive).
+
+### settle account order (Ix=5) — appended 12 accounts; payload still nonce-only (8B)
+`0 oracle(w) · 1 market(w) · 2 ai_claim · 3 proposer(w) · 4 question(w) · 5
+pass_amm · 6 fail_amm · 7 cv_program · 8 cv_event_authority · 9 token_program · 10
+stake_vault(w) · 11 kass_vault(w) · 12 kass_vault_underlying(w) · 13
+pass_kass_mint(w) · 14 fail_kass_mint(w) · 15 oracle_pass_kass(w) · 16
+oracle_fail_kass(w) · 17 challenger_usdc_vault(w, escrow) · 18 proposer_usdc(w) ·
+19 challenger_usdc_dest(w) · 20 challenger_kass(w)`. The three payout token
+accounts are bound by mint + owner (`proposer_usdc ↔ proposer.authority`,
+`challenger_usdc/kass ↔ market.challenger`); stake_vault/kass_vault/escrow/
+conditional holders are pinned to the recorded `Oracle`/`Market`, so a settle
+cranker cannot redirect funds. New `fee_amount(value, num, den)` helper (u128,
+checked, den==0 → InvalidConfig).
+
+### C1-carryforward fixes
+- `open_challenge`: reject `required_usdc == 0` → `ZeroStake` (sub-micro/zero
+  bond escrow truncates to nothing; no fee source at settle). New test
+  `open_challenge_zero_escrow_fails` (bond=1 → escrow 0 → ZeroStake, no Market).
+- `open_challenge`: `KNOWN LIMITATION` comment on the escrow `create_pda`
+  (pre-funding griefing, matching propose/submit_fact convention).
+- Documented the POOL-ORIENTATION assumption (kass_price = USDC-per-KASS because
+  the blessed `kass_dao` spot pool is KASS-base/USDC-quote) where the escrow is
+  sized, plus the DOWNWARD-truncation note on the escrow value.
+
+### Tests (settle_challenge.rs)
+- `settle_fraud_*` + `settle_honest_*` extended with the full physical-redeem +
+  fee assertions (redeem drains the conditional KASS vault + burns both holders;
+  KASS routing incl. the kass_fee carve-out; USDC routing + exact conservation
+  for both outcomes). New `settle_fee_rates_are_oracle_snapshotted` (retune the
+  oracle snapshot to 5% KASS / 2% USDC → settle's fee tracks it). Existing
+  before-window / double-settle / AMM-binding-attack / aliased-AMM / last-block-
+  swap / uncranked-pass tests intact. All driven against the REAL v0.4 AMM +
+  conditional_vault binaries in LiteSVM.

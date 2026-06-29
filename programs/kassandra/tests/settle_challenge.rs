@@ -461,6 +461,21 @@ fn open_challenge_ix(
     }
 }
 
+/// Settlement accounts beyond the core 0..=8 (C2 physical redeem + fees).
+struct SettleExtras {
+    stake_vault: Pubkey,
+    kass_vault: Pubkey,
+    kass_vault_underlying: Pubkey,
+    pass_mint: Pubkey,
+    fail_mint: Pubkey,
+    oracle_pass_kass: Pubkey,
+    oracle_fail_kass: Pubkey,
+    escrow_vault: Pubkey,
+    proposer_usdc: Pubkey,
+    challenger_usdc_dest: Pubkey,
+    challenger_kass: Pubkey,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn settle_ix(
     ctx: &TestCtx,
@@ -471,6 +486,7 @@ fn settle_ix(
     question: Pubkey,
     pass_amm: Pubkey,
     fail_amm: Pubkey,
+    x: &SettleExtras,
     nonce: u64,
 ) -> Instruction {
     let (cv_event_auth, _) =
@@ -489,6 +505,18 @@ fn settle_ix(
             AccountMeta::new_readonly(fail_amm, false),
             AccountMeta::new_readonly(vault_id(), false),
             AccountMeta::new_readonly(cv_event_auth, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            AccountMeta::new(x.stake_vault, false),
+            AccountMeta::new(x.kass_vault, false),
+            AccountMeta::new(x.kass_vault_underlying, false),
+            AccountMeta::new(x.pass_mint, false),
+            AccountMeta::new(x.fail_mint, false),
+            AccountMeta::new(x.oracle_pass_kass, false),
+            AccountMeta::new(x.oracle_fail_kass, false),
+            AccountMeta::new(x.escrow_vault, false),
+            AccountMeta::new(x.proposer_usdc, false),
+            AccountMeta::new(x.challenger_usdc_dest, false),
+            AccountMeta::new(x.challenger_kass, false),
         ],
         data,
     }
@@ -546,6 +574,32 @@ struct Fixture {
     m: MarketAccounts,
     pass_amm: Pubkey,
     fail_amm: Pubkey,
+    // C2 physical-settlement accounts.
+    stake_vault: Pubkey,
+    oracle_pass_kass: Pubkey,
+    oracle_fail_kass: Pubkey,
+    escrow_vault: Pubkey,
+    proposer_usdc: Pubkey,
+    challenger_usdc_dest: Pubkey,
+    challenger_kass: Pubkey,
+}
+
+impl Fixture {
+    fn extras(&self) -> SettleExtras {
+        SettleExtras {
+            stake_vault: self.stake_vault,
+            kass_vault: self.m.kass_vault,
+            kass_vault_underlying: self.m.kass_vault_underlying,
+            pass_mint: self.m.pass_mint,
+            fail_mint: self.m.fail_mint,
+            oracle_pass_kass: self.oracle_pass_kass,
+            oracle_fail_kass: self.oracle_fail_kass,
+            escrow_vault: self.escrow_vault,
+            proposer_usdc: self.proposer_usdc,
+            challenger_usdc_dest: self.challenger_usdc_dest,
+            challenger_kass: self.challenger_kass,
+        }
+    }
 }
 
 /// What (if anything) to corrupt about the recorded AMMs, for the attack tests.
@@ -593,6 +647,7 @@ fn fixture_with_attack(pass_quote: u64, fail_quote: u64, attack: AmmAttack) -> (
     let nonce = seeded.nonce;
     let stake_vault = seeded.stake_vault;
     let proposer = seeded.proposers[0].pda;
+    let proposer_authority = seeded.proposers[0].authority.pubkey();
     let proposer_other = seeded.proposers[1].pda;
 
     ctx.set_phase(oracle, Phase::Challenge);
@@ -659,6 +714,20 @@ fn fixture_with_attack(pass_quote: u64, fail_quote: u64, attack: AmmAttack) -> (
     ctx.send_many(&cu(ix), &[&challenger])
         .expect("open_challenge should succeed");
 
+    // Payout destinations for settle: proposer's USDC (fee on survive),
+    // challenger's USDC (escrow return) + KASS (fee on disqualify). Fabricated
+    // empty; settle pays into them.
+    let usdc_mint = ctx.usdc_mint;
+    let kass_mint = ctx.kass_mint;
+    let challenger_pk = challenger.pubkey();
+    let proposer_usdc = Pubkey::new_unique();
+    let challenger_usdc_dest = Pubkey::new_unique();
+    let challenger_kass = Pubkey::new_unique();
+    fabricate_token_account(&mut ctx, proposer_usdc, usdc_mint, proposer_authority, 0);
+    fabricate_token_account(&mut ctx, challenger_usdc_dest, usdc_mint, challenger_pk, 0);
+    fabricate_token_account(&mut ctx, challenger_kass, kass_mint, challenger_pk, 0);
+    let (escrow_vault, _) = TestCtx::challenge_usdc_vault_pda(&ctx.program_id, &market);
+
     (
         ctx,
         Fixture {
@@ -671,6 +740,13 @@ fn fixture_with_attack(pass_quote: u64, fail_quote: u64, attack: AmmAttack) -> (
             m,
             pass_amm,
             fail_amm,
+            stake_vault,
+            oracle_pass_kass,
+            oracle_fail_kass,
+            escrow_vault,
+            proposer_usdc,
+            challenger_usdc_dest,
+            challenger_kass,
         },
     )
 }
@@ -697,18 +773,35 @@ fn settle_fraud_disqualifies_and_resolves_fail_side() {
         f.m.question,
         f.pass_amm,
         f.fail_amm,
+        &f.extras(),
         f.nonce,
     );
+    // Pre-settle balances for the USDC/KASS conservation checks.
+    let escrow_before = ctx.token_balance(f.escrow_vault);
+    let stake_before = ctx.token_balance(f.stake_vault);
+    assert_eq!(escrow_before, required_escrow_usdc(BOND), "escrow funded");
+
     ctx.send_many(&cu(ix), &[]).expect("settle should succeed");
+
+    // C2 KASS-fee carve-out: 1% of the bond → challenger; bond − fee → bond_pool.
+    let kass_fee = BOND / 100;
+    let net_slash = BOND - kass_fee;
 
     let p = ctx.proposer(f.proposer);
     assert_eq!(p.disqualified, 1, "fraud proposer disqualified");
     assert_eq!(p.slashed, 1);
-    assert_eq!(p.slashed_amount, BOND, "full bond forfeit");
+    assert_eq!(
+        p.slashed_amount, net_slash,
+        "bond − kass_fee forfeit to bond_pool"
+    );
 
     let o = ctx.oracle(f.oracle);
     assert_eq!(o.surviving_count, surviving_before - 1);
-    assert_eq!(o.bond_pool, bond_pool_before + BOND);
+    assert_eq!(
+        o.bond_pool,
+        bond_pool_before + net_slash,
+        "bond_pool gets bond − kass_fee (identity == slashed_amount)"
+    );
     assert_eq!(o.phase, Phase::Challenge as u8, "phase stays Challenge");
     // settle decremented the open-market counter 1 → 0.
     assert_eq!(
@@ -726,9 +819,52 @@ fn settle_fraud_disqualifies_and_resolves_fail_side() {
     // The other proposer is untouched.
     assert_eq!(ctx.proposer(f.proposer_other).disqualified, 0);
 
-    // Conservation still holds after settle: the resolution + accounting move no
-    // KASS, so stake_vault + conditional-vault underlying == total_oracle_stake.
-    assert_kass_conserved(&ctx, f.oracle, f.m.kass_vault_underlying);
+    // --- physical redeem: the bond's conditional KASS came back as underlying --
+    // The KASS conditional vault's underlying is fully drained (redeemed), and
+    // both oracle-PDA conditional-KASS holders are burned to 0.
+    assert_eq!(
+        ctx.token_balance(f.m.kass_vault_underlying),
+        0,
+        "redeem drained the conditional KASS vault underlying"
+    );
+    assert_eq!(ctx.token_balance(f.oracle_pass_kass), 0, "pass-KASS burned");
+    assert_eq!(ctx.token_balance(f.oracle_fail_kass), 0, "fail-KASS burned");
+
+    // --- KASS routing: redeem +BOND to stake_vault, then kass_fee → challenger -
+    assert_eq!(
+        ctx.token_balance(f.challenger_kass),
+        kass_fee,
+        "challenger receives the KASS fee"
+    );
+    assert_eq!(
+        ctx.token_balance(f.stake_vault),
+        stake_before + BOND - kass_fee,
+        "stake_vault: +bond (redeem) − kass_fee (to challenger)"
+    );
+    // KASS conservation with the fee carve-out: stake_vault + vault_underlying +
+    // challenger_kass == total_oracle_stake (the fee left the system to the
+    // challenger; everything else is accounted in stake_vault / the drained vault).
+    let total = ctx.oracle(f.oracle).total_oracle_stake;
+    assert_eq!(
+        ctx.token_balance(f.stake_vault)
+            + ctx.token_balance(f.m.kass_vault_underlying)
+            + ctx.token_balance(f.challenger_kass),
+        total,
+        "KASS conservation incl. the kass_fee carve-out",
+    );
+
+    // --- USDC routing: full escrow returned to the challenger, none to proposer -
+    assert_eq!(
+        ctx.token_balance(f.challenger_usdc_dest),
+        escrow_before,
+        "full USDC escrow returned to challenger on a successful challenge"
+    );
+    assert_eq!(
+        ctx.token_balance(f.proposer_usdc),
+        0,
+        "no proposer USDC fee on a successful challenge"
+    );
+    assert_eq!(ctx.token_balance(f.escrow_vault), 0, "escrow fully drained");
 }
 
 #[test]
@@ -751,8 +887,13 @@ fn settle_honest_survives_and_resolves_pass_side() {
         f.m.question,
         f.pass_amm,
         f.fail_amm,
+        &f.extras(),
         f.nonce,
     );
+    let escrow_before = ctx.token_balance(f.escrow_vault);
+    let stake_before = ctx.token_balance(f.stake_vault);
+    assert_eq!(escrow_before, required_escrow_usdc(BOND), "escrow funded");
+
     ctx.send_many(&cu(ix), &[]).expect("settle should succeed");
 
     let p = ctx.proposer(f.proposer);
@@ -770,8 +911,47 @@ fn settle_honest_survives_and_resolves_pass_side() {
     let (n0, n1, denom) = question_resolution(&ctx, f.m.question);
     assert_eq!((n0, n1, denom), (1, 0, 1), "pass-side resolution");
 
-    // Conservation still holds after a survive-side settle (no KASS moved).
+    // --- physical redeem: bond stays the proposer's, back in stake_vault -------
+    assert_eq!(
+        ctx.token_balance(f.m.kass_vault_underlying),
+        0,
+        "redeem drained the conditional KASS vault underlying"
+    );
+    assert_eq!(ctx.token_balance(f.oracle_pass_kass), 0, "pass-KASS burned");
+    assert_eq!(ctx.token_balance(f.oracle_fail_kass), 0, "fail-KASS burned");
+    assert_eq!(
+        ctx.token_balance(f.stake_vault),
+        stake_before + BOND,
+        "stake_vault: +bond (redeem), no KASS fee on a failed challenge"
+    );
+    assert_eq!(
+        ctx.token_balance(f.challenger_kass),
+        0,
+        "no challenger KASS fee when the challenge fails"
+    );
+    // No KASS left the system on the survive path: stake_vault + underlying ==
+    // total_oracle_stake (the original idle-bond conservation, now physical).
     assert_kass_conserved(&ctx, f.oracle, f.m.kass_vault_underlying);
+
+    // --- USDC routing: 1% fee → proposer, the remainder → challenger -----------
+    let usdc_fee = escrow_before / 100;
+    assert_eq!(
+        ctx.token_balance(f.proposer_usdc),
+        usdc_fee,
+        "proposer receives the USDC fee on a failed challenge"
+    );
+    assert_eq!(
+        ctx.token_balance(f.challenger_usdc_dest),
+        escrow_before - usdc_fee,
+        "challenger gets the escrow minus the fee"
+    );
+    // USDC conservation: fee + return == escrow, exactly.
+    assert_eq!(
+        ctx.token_balance(f.proposer_usdc) + ctx.token_balance(f.challenger_usdc_dest),
+        escrow_before,
+        "USDC escrow fully accounted (fee + return == escrow)"
+    );
+    assert_eq!(ctx.token_balance(f.escrow_vault), 0, "escrow fully drained");
 }
 
 #[test]
@@ -787,6 +967,7 @@ fn settle_before_twap_end_fails() {
         f.m.question,
         f.pass_amm,
         f.fail_amm,
+        &f.extras(),
         f.nonce,
     );
     let err = ctx.send_many(&cu(ix), &[]).unwrap_err().err;
@@ -813,6 +994,7 @@ fn settle_twice_is_already_settled() {
         f.m.question,
         f.pass_amm,
         f.fail_amm,
+        &f.extras(),
         f.nonce,
     );
     ctx.send_many(&cu(ix.clone()), &[])
@@ -846,6 +1028,7 @@ fn settle_with_unbound_amm_fails() {
         f.m.question,
         f.pass_amm,
         f.fail_amm,
+        &f.extras(),
         f.nonce,
     );
     let err = ctx.send_many(&cu(ix), &[]).unwrap_err().err;
@@ -877,6 +1060,7 @@ fn settle_with_aliased_amms_fails() {
         f.m.question,
         f.pass_amm,
         f.fail_amm,
+        &f.extras(),
         f.nonce,
     );
     let err = ctx.send_many(&cu(ix), &[]).unwrap_err().err;
@@ -947,6 +1131,7 @@ fn settle_last_block_swap_does_not_flip_outcome() {
         f.m.question,
         f.pass_amm,
         f.fail_amm,
+        &f.extras(),
         f.nonce,
     );
     ctx.send_many(&cu(ix), &[]).expect("settle should succeed");
@@ -993,6 +1178,7 @@ fn settle_uncranked_pass_pool_survives() {
         f.m.question,
         f.pass_amm,
         f.fail_amm,
+        &f.extras(),
         f.nonce,
     );
     ctx.send_many(&cu(ix), &[]).expect("settle should succeed");
@@ -1009,4 +1195,49 @@ fn settle_uncranked_pass_pool_survives() {
     assert_eq!(ctx.read_pod::<Market>(f.market).settled, 1);
     let (n0, n1, _) = question_resolution(&ctx, f.m.question);
     assert_eq!((n0, n1), (1, 0), "pass-side resolution");
+}
+
+#[test]
+fn settle_fee_rates_are_oracle_snapshotted() {
+    // Fee sensitivity: settle reads the directional fee rates from the ORACLE's
+    // snapshot (what create_oracle copies from Protocol and set_config retunes),
+    // NOT a hard-coded const. Retune the snapshot to 5% KASS / 2% USDC and assert
+    // the disqualify-path KASS fee tracks it. (set_config → new-oracle snapshot is
+    // covered in set_config.rs; this pins the settle-side consumption.)
+    let (mut ctx, f) = fixture(QUOTE_LOW, QUOTE_HIGH); // fraud (disqualify) path
+                                                       // 5% KASS fee on a successful challenge, 2% USDC fee on a failed one.
+    ctx.set_challenge_fees(f.oracle, 2, 100, 5, 100);
+    let bond_pool_before = ctx.oracle(f.oracle).bond_pool;
+    let escrow_before = ctx.token_balance(f.escrow_vault);
+
+    ctx.warp(TWAP_WINDOW + 1);
+    let ix = settle_ix(
+        &ctx,
+        f.oracle,
+        f.market,
+        f.ai_claim,
+        f.proposer,
+        f.m.question,
+        f.pass_amm,
+        f.fail_amm,
+        &f.extras(),
+        f.nonce,
+    );
+    ctx.send_many(&cu(ix), &[]).expect("settle should succeed");
+
+    // 5% of the bond → challenger; bond − fee → bond_pool (the new rate, not 1%).
+    let kass_fee = BOND * 5 / 100;
+    assert_eq!(
+        ctx.token_balance(f.challenger_kass),
+        kass_fee,
+        "settle used the retuned 5% KASS fee"
+    );
+    assert_eq!(ctx.proposer(f.proposer).slashed_amount, BOND - kass_fee);
+    assert_eq!(
+        ctx.oracle(f.oracle).bond_pool,
+        bond_pool_before + BOND - kass_fee
+    );
+    // Full USDC escrow still returned to the challenger on disqualify (the USDC
+    // fee rate only bites on the survive path).
+    assert_eq!(ctx.token_balance(f.challenger_usdc_dest), escrow_before);
 }

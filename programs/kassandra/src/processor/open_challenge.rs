@@ -360,6 +360,14 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // KASS_PRICE_SCALE, so the cross-decimal (KASS 9dp / USDC 6dp) adjustment is
     // folded in: required_usdc = bond × twap / KASS_PRICE_SCALE (u128 intermediate,
     // overflow-checked back into u64).
+    // POOL-ORIENTATION ASSUMPTION (load-bearing): `kass_price` reads the BLESSED
+    // futarchy `kass_dao` spot pool, which is KASS-base / USDC-quote, so its TWAP
+    // is `quote-per-base = raw-USDC per raw-KASS × KASS_PRICE_SCALE`. That is
+    // exactly the "price of one KASS in USDC" we need to value a KASS bond in
+    // USDC; if the pool were inverted (USDC-base/KASS-quote) this product would be
+    // the reciprocal and the escrow would be nonsensical. The orientation is fixed
+    // by `Protocol.kass_dao` (set once at governance handoff), so this holds for
+    // every challenge under that protocol.
     assert_key(usdc_mint_ai, &oracle.usdc_mint)?;
     let protocol = load_protocol(protocol_ai, program_id)?;
     let twap = kass_price(&protocol, kass_dao_ai)?;
@@ -370,6 +378,15 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
             / KASS_PRICE_SCALE,
     )
     .map_err(|_| ProgramError::ArithmeticOverflow)?;
+    // A zero escrow means the challenger stakes nothing (sub-micro KASS valuation
+    // truncated to 0, or a zero bond). Reject: a challenge must put real USDC
+    // skin-in-the-game, and a zero-escrow market has no source for the directional
+    // USDC fee at settle. NOTE the truncation is DOWNWARD (`× twap / SCALE` floors),
+    // so a funded escrow can be ≤ the exact fair value by < 1 USDC base unit —
+    // settle's USDC conservation accounts for the escrow as recorded, not the ideal.
+    if required_usdc == 0 {
+        return Err(KassandraError::ZeroStake.into());
+    }
 
     // --- create + fund the challenger USDC escrow vault (market-owned) ------
     // Bare SPL token account at PDA `[b"challenge_usdc", market]`, initialized
@@ -377,6 +394,12 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // create_oracle stands up `stake_vault`), then funded by the challenger's
     // signed Transfer. An under-funded challenger's source account makes the
     // SPL Transfer fail, rejecting the whole instruction.
+    // KNOWN LIMITATION (deferred, same mechanism as propose/submit_fact's PDA
+    // creation): an attacker could grief by pre-funding this predicted escrow PDA
+    // with 1 lamport so the `create_pda` CreateAccount fails. It is narrow — the
+    // PDA is keyed by `market`, which is itself keyed by `ai_claim`, so it can
+    // only block one specific, already-known challenge. The future fix is system
+    // Allocate + Assign (tolerates a pre-funded account); not worth it now.
     let (expected_escrow, escrow_bump) =
         find_program_address(&[b"challenge_usdc", market_ai.key().as_ref()], program_id);
     assert_key(escrow_vault_ai, &expected_escrow)?;

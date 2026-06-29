@@ -326,6 +326,19 @@ pub fn merge_tokens_data(amount: u64) -> [u8; 16] {
     interact_data(&MERGE_TOKENS, amount)
 }
 
+/// `redeem_tokens` instruction data — NO args (just the discriminator). Validated
+/// against the deployed v0.4 `conditional_vault` source: `handle_redeem_tokens`
+/// takes no instruction args; it burns the holder's FULL balance of every
+/// outcome's conditional token and transfers
+/// `Σ_i balance_i × payout_numerators[i] / payout_denominator` underlying out of
+/// the vault to the holder. For a binary pass-wins `[1,0]`: pass-balance redeems
+/// 1:1, fail-balance → 0 (both burned); fail-wins `[0,1]` is symmetric. Uses the
+/// SAME `InteractWithVault` account struct as `split_tokens` (see the account
+/// ordering note below).
+pub fn redeem_tokens_data() -> [u8; 8] {
+    REDEEM_TOKENS
+}
+
 fn interact_data(disc: &[u8; 8], amount: u64) -> [u8; 16] {
     let mut out = [0u8; 16];
     out[0..8].copy_from_slice(disc);
@@ -369,12 +382,21 @@ pub fn resolve_question_data_binary(numerators: [u32; 2]) -> [u8; 20] {
 //   8 event_authority           9 conditional_vault program id
 //   …remaining: conditional_token_mint[0..num_outcomes] (w, PDA, created here)
 //
-// `split_tokens` / `merge_tokens` — accounts (InteractWithVault):
+// `split_tokens` / `merge_tokens` / `redeem_tokens` — accounts (InteractWithVault):
 //   0 question                  1 vault (w)             2 vault_underlying_ata (w)
 //   3 authority (signer)        4 user_underlying_ata (w)   5 token_program
 //   6 event_authority           7 conditional_vault program id
 //   …remaining: conditional_token_mint[0..n] (w)
 //              then user_conditional_token_account[0..n] (w, owner == authority)
+//
+// All THREE share the identical `InteractWithVault` account struct (verified
+// against the deployed v0.4 `conditional_vault` source `common.rs`); only the
+// handler differs. `user_underlying_token_account` is constrained
+// `token::authority = authority` + `token::mint = vault.underlying_token_mint`,
+// so on a program-signed `redeem_tokens` the redeemed underlying lands in an
+// account owned by the signing authority (our oracle PDA — i.e. `stake_vault`),
+// and the `user_conditional_token_account[i]` must be owned by that same
+// authority. `redeem_tokens` additionally requires `question.is_resolved()`.
 //
 // For split, the vault mints `amount` of EACH outcome's conditional token to the
 // user and pulls `amount` underlying into the vault ATA. Binary (pass/fail)

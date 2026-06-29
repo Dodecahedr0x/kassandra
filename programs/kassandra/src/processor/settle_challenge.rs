@@ -44,31 +44,64 @@
 //! * **Survives (honest):** no slash; the question resolves PASS-side (`[1, 0]`).
 //!
 //! `slashed_amount` is kept consistent with Task 7's per-proposer accounting
-//! (a proposer's `bond_pool` contribution always equals its `slashed_amount`):
-//! we add only `bond - already_slashed` so a previously flip-slashed proposer is
-//! topped up to the full bond, never double-counted.
+//! (a proposer's `bond_pool` contribution always equals its `slashed_amount`).
+//! With the C2 KASS-fee carve-out (below), that contribution is `bond −
+//! kass_fee`: we add only `(bond − kass_fee) − already_slashed` so a previously
+//! flip-slashed proposer is topped up to exactly `bond − kass_fee`, never
+//! double-counted, and the identity `slashed_amount == bond_pool contribution`
+//! still holds.
 //!
-//! # Deferred (documented)
-//! settle performs the program-signed `resolve_question` (making the conditional
-//! tokens redeemable per outcome) and all state/accounting updates. The PHYSICAL
-//! `redeem_tokens` CPI that moves the underlying KASS out of the conditional
-//! vault (fail-side → bond pool, or pass-side → returned) is a documented
-//! follow-up — exactly mirroring `finalize_facts`/`finalize_ai_claims`, which
-//! account slashes in the `bond_pool` counter without moving tokens. The slash
-//! DECISION, the AMM binding, the TWAP read, and `surviving_count` / `bond_pool`
-//! / `slashed_amount` updates are all real here.
+//! # Physical settlement + directional fees (Task C2 — implemented here)
+//! After `resolve_question`, settle PHYSICALLY redeems the bond's idle pass/fail
+//! conditional KASS (`market.oracle_pass_kass` + `oracle_fail_kass`) back into
+//! `oracle.stake_vault` via a program-signed `redeem_tokens` CPI (winning side
+//! redeems 1:1, losing side → 0, so the FULL `bond` KASS lands in `stake_vault`;
+//! the bond was split into BOTH legs at `open_challenge` and never traded, so the
+//! redeem is clean — recon §3/§4). Then it routes the directional fees:
+//! * **Survives (pass-win, challenge FAILED):** the bond is the proposer's (no
+//!   slash). `usdc_fee = challenger_usdc × challenge_fail_usdc_fee_num/den` →
+//!   PROPOSER's USDC account; `challenger_usdc − usdc_fee` → CHALLENGER's USDC
+//!   account. (Escrow fully accounted: fee + return == escrow.)
+//! * **Disqualified (fail-win, challenge SUCCEEDED):** `kass_fee = bond ×
+//!   challenge_success_kass_fee_num/den` → CHALLENGER's KASS account (from
+//!   `stake_vault`); `bond − kass_fee` is the proposer's `bond_pool` contribution
+//!   (== `slashed_amount`). The FULL `challenger_usdc` escrow → CHALLENGER's USDC
+//!   account. (No proposer USDC fee on a successful challenge.)
+//!
+//! All token moves are program-signed by the oracle PDA (the SPL authority of
+//! `stake_vault`, the escrow vault, and the conditional-KASS destinations).
+//!
+//! # Conservation
+//! * KASS: redeem lands `bond` in `stake_vault`; on disqualify `kass_fee` then
+//!   leaves to the challenger, so `stake_vault + kass_vault_underlying + kass_fee
+//!   == total_oracle_stake`; on survive nothing leaves, so `stake_vault +
+//!   kass_vault_underlying == total_oracle_stake`.
+//! * USDC: `challenger_usdc == challenger_return + proposer_fee` (survive) or
+//!   `== challenger_return + 0` (disqualify), exactly.
 //!
 //! # Accounts
-//! 0. oracle              — writable; owned by this program; the question's
-//!    resolver (signs `resolve_question` via the oracle PDA seeds)
-//! 1. market              — writable; the [`Market`] PDA for this claim
-//! 2. ai_claim            — read-only; `== market.ai_claim`
-//! 3. proposer            — writable; `== market.proposer`
-//! 4. question            — writable; `== market.question` (resolved here)
-//! 5. pass_amm            — read-only; `== market.pass_amm`, owned by `AMM_ID`
-//! 6. fail_amm            — read-only; `== market.fail_amm`, owned by `AMM_ID`
-//! 7. conditional_vault program
-//! 8. cv_event_authority  — read-only; conditional_vault `#[event_cpi]` authority
+//! 0.  oracle              — writable; owned by this program; the question's
+//!     resolver + SPL authority of stake_vault/escrow/conditional dests
+//! 1.  market              — writable; the [`Market`] PDA for this claim
+//! 2.  ai_claim            — read-only; `== market.ai_claim`
+//! 3.  proposer            — writable; `== market.proposer`
+//! 4.  question            — writable; `== market.question` (resolved here)
+//! 5.  pass_amm            — read-only; `== market.pass_amm`, owned by `AMM_ID`
+//! 6.  fail_amm            — read-only; `== market.fail_amm`, owned by `AMM_ID`
+//! 7.  conditional_vault program
+//! 8.  cv_event_authority  — read-only; conditional_vault `#[event_cpi]` authority
+//! 9.  token program
+//! 10. stake_vault         — writable; `== oracle.stake_vault` (redeem dest + KASS-fee source)
+//! 11. kass_vault          — writable; `== market.kass_vault` (redeem vault)
+//! 12. kass_vault_underlying — writable; `== kass_vault.underlying_token_account`
+//! 13. pass_kass_mint      — writable; conditional-KASS mint idx 0 of kass_vault
+//! 14. fail_kass_mint      — writable; conditional-KASS mint idx 1 of kass_vault
+//! 15. oracle_pass_kass    — writable; `== market.oracle_pass_kass` (pass-KASS holder)
+//! 16. oracle_fail_kass    — writable; `== market.oracle_fail_kass` (fail-KASS holder)
+//! 17. challenger_usdc_vault — writable; `== market.challenger_usdc_vault` (USDC escrow)
+//! 18. proposer_usdc       — writable; proposer's USDC account (mint==usdc, owner==proposer.authority)
+//! 19. challenger_usdc_dest — writable; challenger's USDC account (mint==usdc, owner==market.challenger)
+//! 20. challenger_kass     — writable; challenger's KASS account (mint==kass, owner==market.challenger)
 //!
 //! # Instruction payload (after the 1-byte discriminant)
 //! `oracle_nonce: u64 LE` (exactly 8 bytes) — the oracle PDA signer seed nonce,
@@ -81,6 +114,7 @@ use pinocchio::{
     pubkey::{find_program_address, Pubkey},
     ProgramResult,
 };
+use pinocchio_token::instructions::Transfer;
 
 use crate::{
     clock::{now, require_phase},
@@ -94,6 +128,51 @@ use crate::{
 
 /// Exact payload length: `oracle_nonce[8]`.
 const PAYLOAD_LEN: usize = 8;
+
+/// Minimum size of an SPL token account (`spl_token::state::Account::LEN`).
+const SPL_TOKEN_ACCOUNT_LEN: usize = 165;
+/// `spl_token::state::Account.mint` byte offset.
+const SPL_TOKEN_MINT_OFFSET: usize = 0;
+/// `spl_token::state::Account.owner` byte offset.
+const SPL_TOKEN_OWNER_OFFSET: usize = 32;
+
+/// Assert `account` is an SPL token account on `expected_mint` whose token
+/// authority is `expected_owner`, else [`KassandraError::InvalidAccount`]. Binds
+/// the proposer/challenger payout destinations so a settle cranker cannot
+/// redirect the directional fees / escrow return to an account they control.
+fn assert_token_account(
+    account: &AccountInfo,
+    expected_mint: &Pubkey,
+    expected_owner: &Pubkey,
+) -> ProgramResult {
+    if !account.is_owned_by(&pinocchio_token::ID) {
+        return Err(KassandraError::InvalidAccount.into());
+    }
+    let data = account.try_borrow_data()?;
+    if data.len() < SPL_TOKEN_ACCOUNT_LEN {
+        return Err(KassandraError::InvalidAccount.into());
+    }
+    let mint = metadao::read_pubkey(&data, SPL_TOKEN_MINT_OFFSET)?;
+    let owner = metadao::read_pubkey(&data, SPL_TOKEN_OWNER_OFFSET)?;
+    if &mint != expected_mint || &owner != expected_owner {
+        return Err(KassandraError::InvalidAccount.into());
+    }
+    Ok(())
+}
+
+/// `value × num / den` in u128, checked back into `u64`. `den == 0` (a malformed
+/// fee config) is rejected as [`KassandraError::InvalidConfig`]. Used for both
+/// directional fees (KASS fee on a successful challenge, USDC fee on a failed
+/// one).
+fn fee_amount(value: u64, num: u64, den: u64) -> Result<u64, ProgramError> {
+    if den == 0 {
+        return Err(KassandraError::InvalidConfig.into());
+    }
+    let scaled = (value as u128)
+        .checked_mul(num as u128)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+    u64::try_from(scaled / den as u128).map_err(|_| ProgramError::ArithmeticOverflow)
+}
 
 /// Verify `amm` is owned by `AMM_ID`, carries the `Amm` Anchor discriminator,
 /// and is bound to `(expected_base, expected_quote)`, then return its
@@ -144,13 +223,14 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     }
     let oracle_nonce = u64::from_le_bytes(payload[0..8].try_into().unwrap());
 
-    let [oracle_ai, market_ai, ai_claim_ai, proposer_ai, question_ai, pass_amm_ai, fail_amm_ai, cv_prog_ai, cv_event_auth_ai, ..] =
+    let [oracle_ai, market_ai, ai_claim_ai, proposer_ai, question_ai, pass_amm_ai, fail_amm_ai, cv_prog_ai, cv_event_auth_ai, token_prog_ai, stake_vault_ai, kass_vault_ai, kass_vault_underlying_ai, pass_kass_mint_ai, fail_kass_mint_ai, oracle_pass_kass_ai, oracle_fail_kass_ai, escrow_vault_ai, proposer_usdc_ai, challenger_usdc_dest_ai, challenger_kass_ai, ..] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
     assert_key(cv_prog_ai, &metadao::CONDITIONAL_VAULT_ID)?;
+    assert_key(token_prog_ai, &pinocchio_token::ID)?;
 
     // --- oracle + phase gate -----------------------------------------------
     let mut oracle: Oracle = load_oracle(oracle_ai, program_id)?;
@@ -219,6 +299,41 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         return Err(KassandraError::InvalidAccount.into());
     }
 
+    // --- bind the physical-settlement accounts ------------------------------
+    // The redeem + fee CPIs below need: the stake vault (redeem dest + KASS-fee
+    // source), the KASS conditional vault + its underlying ATA, the conditional
+    // KASS mints + the oracle-PDA-owned holders the bond was split into, the USDC
+    // escrow, and the proposer/challenger payout accounts. Bind every one to the
+    // recorded `Market`/`Oracle` so a settle cranker cannot substitute accounts.
+    assert_key(stake_vault_ai, &oracle.stake_vault)?;
+    assert_key(kass_vault_ai, &market.kass_vault)?;
+    assert_key(pass_kass_mint_ai, &pass_kass_mint)?;
+    assert_key(fail_kass_mint_ai, &fail_kass_mint)?;
+    assert_key(oracle_pass_kass_ai, &market.oracle_pass_kass)?;
+    assert_key(oracle_fail_kass_ai, &market.oracle_fail_kass)?;
+    assert_key(escrow_vault_ai, &market.challenger_usdc_vault)?;
+    // The redeem vault's underlying token account must be the one the vault
+    // records (the same ATA the bond was split into at open_challenge).
+    assert_owned_by_program(kass_vault_ai, &metadao::CONDITIONAL_VAULT_ID)?;
+    {
+        let data = kass_vault_ai.try_borrow_data()?;
+        let v_underlying_acct =
+            metadao::read_pubkey(&data, metadao::VAULT_UNDERLYING_ACCOUNT_OFFSET)?;
+        if &v_underlying_acct != kass_vault_underlying_ai.key() {
+            return Err(KassandraError::InvalidAccount.into());
+        }
+    }
+    // Payout destinations: pin mint + owner so the directional fees / escrow
+    // return cannot be siphoned. Proposer USDC ↔ proposer.authority; challenger
+    // USDC + KASS ↔ market.challenger.
+    assert_token_account(proposer_usdc_ai, &oracle.usdc_mint, &proposer.authority)?;
+    assert_token_account(
+        challenger_usdc_dest_ai,
+        &oracle.usdc_mint,
+        &market.challenger,
+    )?;
+    assert_token_account(challenger_kass_ai, &oracle.kass_mint, &market.challenger)?;
+
     // --- slash trigger (u128): fail_twap * DEN > pass_twap * (DEN + NUM) -----
     // GUARD: `pass_twap == 0` ALWAYS survives. A zero pass TWAP means the pass
     // pool has no observation — i.e. NO counter-trading on the pass side — which
@@ -245,17 +360,31 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // PASS-side [1,0] survives, FAIL-side [0,1] disqualifies.
     let numerators: [u32; 2] = if disqualify { [0, 1] } else { [1, 0] };
 
+    // Directional KASS fee on a SUCCESSFUL challenge (disqualify): a carve-out of
+    // the bond to the challenger. The proposer's `bond_pool` contribution becomes
+    // `bond − kass_fee` (NOT the full bond), keeping the per-proposer identity
+    // `slashed_amount == bond_pool contribution`.
+    let kass_fee = fee_amount(
+        proposer.bond,
+        oracle.challenge_success_kass_fee_num,
+        oracle.challenge_success_kass_fee_den,
+    )?;
+
     if disqualify && !proposer.is_disqualified() {
-        // Forfeit the full bond; top up any prior (flip) slash so the proposer's
-        // bond_pool contribution equals its slashed_amount == bond (no double
-        // counting, never exceeds the physically escrowed bond).
-        let delta = proposer
+        // Net slash = bond − kass_fee. Top up any prior (flip) slash to exactly
+        // that net (never double-counting, never exceeding the escrowed bond):
+        // the kass_fee leaves to the challenger below, the rest is the bond_pool
+        // contribution.
+        let net_slash = proposer
             .bond
+            .checked_sub(kass_fee)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+        let delta = net_slash
             .checked_sub(proposer.slashed_amount)
             .ok_or(ProgramError::ArithmeticOverflow)?;
         proposer.disqualified = 1;
         proposer.slashed = 1;
-        proposer.slashed_amount = proposer.bond;
+        proposer.slashed_amount = net_slash;
         oracle.bond_pool = oracle
             .bond_pool
             .checked_add(delta)
@@ -285,13 +414,111 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         Seed::from(nonce_le.as_ref()),
         Seed::from(&bump_seed),
     ];
-    let oracle_signer = Signer::from(&oracle_seeds);
     metadao::invoke_conditional_vault_signed(
         &resolve_data,
         &resolve_metas,
         &resolve_infos,
-        &[oracle_signer],
+        &[Signer::from(&oracle_seeds)],
     )?;
+
+    // --- physical redeem: bond's conditional KASS → stake_vault -------------
+    // redeem_tokens (InteractWithVault, same shape as the open_challenge split):
+    //   0 question  1 kass_vault(w)  2 kass_vault_underlying(w)
+    //   3 authority=oracle PDA(signer)  4 stake_vault(w, user_underlying)
+    //   5 token_program  6 cv_event_auth  7 cv_program
+    //   remaining: pass_mint(w) fail_mint(w) oracle_pass_kass(w) oracle_fail_kass(w)
+    // The question is now resolved, so the winning side redeems 1:1 and the losing
+    // side → 0 — the FULL `bond` KASS the proposer split lands in `stake_vault`.
+    let redeem_data = metadao::redeem_tokens_data();
+    let redeem_metas = [
+        AccountMeta::readonly(question_ai.key()),
+        AccountMeta::writable(kass_vault_ai.key()),
+        AccountMeta::writable(kass_vault_underlying_ai.key()),
+        AccountMeta::readonly_signer(oracle_ai.key()), // authority (oracle PDA)
+        AccountMeta::writable(stake_vault_ai.key()),   // user_underlying (dest)
+        AccountMeta::readonly(token_prog_ai.key()),
+        AccountMeta::readonly(cv_event_auth_ai.key()),
+        AccountMeta::readonly(cv_prog_ai.key()),
+        AccountMeta::writable(pass_kass_mint_ai.key()),
+        AccountMeta::writable(fail_kass_mint_ai.key()),
+        AccountMeta::writable(oracle_pass_kass_ai.key()),
+        AccountMeta::writable(oracle_fail_kass_ai.key()),
+    ];
+    let redeem_infos = [
+        question_ai,
+        kass_vault_ai,
+        kass_vault_underlying_ai,
+        oracle_ai,
+        stake_vault_ai,
+        token_prog_ai,
+        cv_event_auth_ai,
+        cv_prog_ai,
+        pass_kass_mint_ai,
+        fail_kass_mint_ai,
+        oracle_pass_kass_ai,
+        oracle_fail_kass_ai,
+    ];
+    metadao::invoke_conditional_vault_signed(
+        &redeem_data,
+        &redeem_metas,
+        &redeem_infos,
+        &[Signer::from(&oracle_seeds)],
+    )?;
+
+    // --- directional fee routing (oracle PDA signs every move) --------------
+    let challenger_usdc = market.challenger_usdc;
+    if disqualify {
+        // Successful challenge: KASS fee carved out of the (now-redeemed) bond in
+        // stake_vault → challenger; full USDC escrow returned to the challenger.
+        if kass_fee > 0 {
+            Transfer {
+                from: stake_vault_ai,
+                to: challenger_kass_ai,
+                authority: oracle_ai,
+                amount: kass_fee,
+            }
+            .invoke_signed(&[Signer::from(&oracle_seeds)])?;
+        }
+        if challenger_usdc > 0 {
+            Transfer {
+                from: escrow_vault_ai,
+                to: challenger_usdc_dest_ai,
+                authority: oracle_ai,
+                amount: challenger_usdc,
+            }
+            .invoke_signed(&[Signer::from(&oracle_seeds)])?;
+        }
+    } else {
+        // Failed challenge: bond stays the proposer's (redeemed into stake_vault).
+        // USDC fee → proposer; the remainder of the escrow → challenger. The split
+        // is exact: usdc_fee + return == challenger_usdc.
+        let usdc_fee = fee_amount(
+            challenger_usdc,
+            oracle.challenge_fail_usdc_fee_num,
+            oracle.challenge_fail_usdc_fee_den,
+        )?;
+        let challenger_return = challenger_usdc
+            .checked_sub(usdc_fee)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+        if usdc_fee > 0 {
+            Transfer {
+                from: escrow_vault_ai,
+                to: proposer_usdc_ai,
+                authority: oracle_ai,
+                amount: usdc_fee,
+            }
+            .invoke_signed(&[Signer::from(&oracle_seeds)])?;
+        }
+        if challenger_return > 0 {
+            Transfer {
+                from: escrow_vault_ai,
+                to: challenger_usdc_dest_ai,
+                authority: oracle_ai,
+                amount: challenger_return,
+            }
+            .invoke_signed(&[Signer::from(&oracle_seeds)])?;
+        }
+    }
 
     // --- persist (oracle, proposer, market) ---------------------------------
     market.settled = 1;
