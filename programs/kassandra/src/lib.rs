@@ -11,6 +11,7 @@ use pinocchio::entrypoint;
 entrypoint!(process_instruction);
 
 pub mod clock;
+pub mod config;
 pub mod error;
 pub mod instruction;
 pub mod processor;

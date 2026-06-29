@@ -31,6 +31,9 @@ pub enum KassandraError {
     /// A stake amount of zero was supplied where a positive stake is required
     /// (a zero-stake fact would pollute quorum for free).
     ZeroStake = 7,
+    /// This voter has already voted on this fact (the FactVote PDA is already
+    /// initialized): one vote per voter per fact.
+    DuplicateVote = 8,
 }
 
 impl From<KassandraError> for ProgramError {

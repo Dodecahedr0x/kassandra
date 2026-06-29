@@ -19,8 +19,11 @@ pub enum Ix {
     OpenChallenge = 4,
     SettleChallenge = 5,
     FinalizeOracle = 6,
-    // Future variants (e.g. AdvancePhase) are APPENDED here with the next
-    // discriminant; add a matching arm to `from_u8` below.
+    /// Permissionless `FactProposal -> FactVoting` freeze once the proposal
+    /// window has elapsed.
+    AdvancePhase = 7,
+    // Future variants are APPENDED here with the next discriminant; add a
+    // matching arm to `from_u8` below.
 }
 
 impl Ix {
@@ -35,6 +38,7 @@ impl Ix {
             4 => Some(Ix::OpenChallenge),
             5 => Some(Ix::SettleChallenge),
             6 => Some(Ix::FinalizeOracle),
+            7 => Some(Ix::AdvancePhase),
             _ => None,
         }
     }

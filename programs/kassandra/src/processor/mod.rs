@@ -12,8 +12,10 @@ use pinocchio::{
 
 use crate::{error::KassandraError, instruction::Ix};
 
+pub mod advance_phase;
 pub mod guards;
 pub mod submit_fact;
+pub mod vote_fact;
 
 pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
     // First byte = discriminant; the rest is the per-instruction payload.
@@ -24,8 +26,9 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
 
     match ix {
         Ix::SubmitFact => submit_fact::process(program_id, accounts, payload),
-        Ix::VoteFact
-        | Ix::FinalizeFacts
+        Ix::VoteFact => vote_fact::process(program_id, accounts, payload),
+        Ix::AdvancePhase => advance_phase::process(program_id, accounts, payload),
+        Ix::FinalizeFacts
         | Ix::SubmitAiClaim
         | Ix::OpenChallenge
         | Ix::SettleChallenge

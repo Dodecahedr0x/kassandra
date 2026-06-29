@@ -169,6 +169,11 @@ impl TestCtx {
         )
     }
 
+    /// Derive the FactVote PDA: seeds `[b"vote", fact, voter]`.
+    pub fn vote_pda(program_id: &Pubkey, fact: &Pubkey, voter: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"vote", fact.as_ref(), voter.as_ref()], program_id)
+    }
+
     // ----- seeding -----------------------------------------------------------
 
     /// Fabricate an oracle already in [`Phase::FactProposal`] with one proposer
