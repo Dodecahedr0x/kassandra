@@ -133,6 +133,36 @@ pub const METEORA_ADD_LIQUIDITY: [u8; 8] = [0xb5, 0x9d, 0x59, 0x43, 0x8f, 0xb6, 
 pub const METEORA_POOL_ACCOUNT_DISCRIMINATOR: [u8; 8] =
     [0xf1, 0x9a, 0x6d, 0x04, 0x11, 0xb1, 0x6d, 0xbc];
 
+// Squads v4 (Squads-Protocol/v4 @ rev 6d5235da). Squads v4 is an **Anchor**
+// program, so its instruction selectors use the SAME scheme as futarchy/Meteora:
+// `sha256("global:<snake_case_name>")[..8]`. (Confirmed against the dumped
+// `squads_v4.so`: the [`SQUADS_VAULT_TRANSACTION_EXECUTE`] discriminator below
+// dispatches into the program's `VaultTransactionExecute` handler — see the
+// F6 dispatch-probe test in `tests/governance_seam.rs`.)
+//
+// The DAO-execution seam Kassandra cares about is `vault_transaction_execute`:
+// a passed futarchy proposal's actions (a `set_config` / `resolve_deadend` CPI
+// into Kassandra) are wrapped in a Squads `VaultTransaction` and run by this
+// instruction, which `invoke_signed`s each inner instruction with the
+// [`squads_vault_pda`] as the signing authority. That vault PDA is exactly what
+// Kassandra stores as `Protocol.dao_authority`.
+
+/// `squads_multisig_program::vault_transaction_execute` — runs a created vault
+/// transaction, signing inner instructions as the multisig's vault PDA. This is
+/// the instruction that produces the `dao_authority` (vault-PDA) signature on
+/// Kassandra's `set_config` / `resolve_deadend` in production.
+pub const SQUADS_VAULT_TRANSACTION_EXECUTE: [u8; 8] =
+    [0xc2, 0x08, 0xa1, 0x57, 0x99, 0xa4, 0x19, 0xab];
+/// `squads_multisig_program::vault_transaction_create` — stages the inner
+/// instructions (the proposal's actions) into a `VaultTransaction` PDA.
+pub const SQUADS_VAULT_TRANSACTION_CREATE: [u8; 8] =
+    [0x30, 0xfa, 0x4e, 0xa8, 0xd0, 0xe2, 0xda, 0xd3];
+/// `squads_multisig_program::proposal_create`.
+pub const SQUADS_PROPOSAL_CREATE: [u8; 8] = [0xdc, 0x3c, 0x49, 0xe0, 0x1e, 0x6c, 0x4f, 0x9f];
+/// `squads_multisig_program::multisig_create_v2` — the CPI `initialize_dao`
+/// makes to stand up the DAO's multisig (`create_key` == the futarchy `Dao`).
+pub const SQUADS_MULTISIG_CREATE_V2: [u8; 8] = [0x32, 0xdd, 0xc7, 0x5d, 0x28, 0xf5, 0x8b, 0xe9];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PDA seeds
 // ─────────────────────────────────────────────────────────────────────────────

@@ -7,8 +7,13 @@
 //! layout offsets from [`kassandra_program::cpi::metadao_v06`].
 //!
 //! Coverage vs. deferral (be honest):
-//! * [`all_v06_fixtures_load`] — all three v0.6/Meteora program fixtures load
-//!   into LiteSVM and are executable. (Required deliverable.)
+//! * [`all_v06_fixtures_load`] — all four v0.6/Meteora/Squads program fixtures
+//!   load into LiteSVM and are executable. (Required deliverable.)
+//! * [`squads_vault_transaction_execute_discriminator_recognized`] (F6) — anchors
+//!   the COMPUTED Squads v4 `vault_transaction_execute` discriminator against the
+//!   real dumped `squads_v4.so`: the binary dispatches into its
+//!   `VaultTransactionExecute` handler for our discriminator (logs the handler
+//!   name) and rejects a bogus one. This is the DAO-execution seam's wire format.
 //! * [`v06_conditional_vault_split`] — a FULL real-binary CPI: initialize_question
 //!   → initialize_conditional_vault → split_tokens against the v0.6-dumped
 //!   conditional_vault, proving its discriminators + PDA seeds + arg layout match
@@ -45,6 +50,7 @@ use spl_token::{
 const FUTARCHY_SO: &[u8] = include_bytes!("fixtures/metadao_futarchy_v06.so");
 const VAULT_V06_SO: &[u8] = include_bytes!("fixtures/metadao_conditional_vault_v06.so");
 const METEORA_SO: &[u8] = include_bytes!("fixtures/meteora_damm_v2.so");
+const SQUADS_SO: &[u8] = include_bytes!("fixtures/squads_v4.so");
 
 const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
@@ -57,11 +63,15 @@ fn vault_id() -> Pubkey {
 fn meteora_id() -> Pubkey {
     Pubkey::new_from_array(md6::METEORA_DAMM_V2_ID)
 }
+fn squads_id() -> Pubkey {
+    Pubkey::new_from_array(md6::SQUADS_V4_ID)
+}
 
 fn load_all(svm: &mut LiteSVM) {
     svm.add_program(futarchy_id(), FUTARCHY_SO);
     svm.add_program(vault_id(), VAULT_V06_SO);
     svm.add_program(meteora_id(), METEORA_SO);
+    svm.add_program(squads_id(), SQUADS_SO);
 }
 
 fn ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
@@ -151,12 +161,91 @@ fn all_v06_fixtures_load() {
         ("futarchy", futarchy_id()),
         ("conditional_vault_v06", vault_id()),
         ("meteora_damm_v2", meteora_id()),
+        ("squads_v4", squads_id()),
     ] {
         let acc = svm
             .get_account(&id)
             .unwrap_or_else(|| panic!("{name} not loaded"));
         assert!(acc.executable, "{name} must be executable");
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1b. Squads v4 `vault_transaction_execute` discriminator anchor (F6 seam).
+//     The Squads v4 multisig vault PDA is Kassandra's `Protocol.dao_authority`;
+//     a passed futarchy proposal signs `set_config`/`resolve_deadend` as that
+//     vault via Squads' `vault_transaction_execute`. We anchor the COMPUTED
+//     `sha256("global:vault_transaction_execute")[..8]` discriminator against the
+//     real dumped binary: the program logs "Instruction: VaultTransactionExecute"
+//     iff its Anchor dispatch table recognizes our discriminator. A garbage
+//     discriminator is not recognized. Both txs fail (we pass only the payer as
+//     an account), but the dispatch log distinguishes a real disc from a fake —
+//     proving the wire format of the execution seam without the (intractable in
+//     LiteSVM) full multisig + proposal + vault-transaction setup.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn squads_vault_transaction_execute_discriminator_recognized() {
+    let mut svm = LiteSVM::new();
+    load_all(&mut svm);
+
+    let payer = Keypair::new();
+    svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
+
+    // Real discriminator + deliberately insufficient accounts.
+    let real = Instruction {
+        program_id: squads_id(),
+        accounts: vec![AccountMeta::new(payer.pubkey(), true)],
+        data: md6::SQUADS_VAULT_TRANSACTION_EXECUTE.to_vec(),
+    };
+    let real_logs = send_capture_logs(&mut svm, &payer, real);
+    assert!(
+        real_logs
+            .iter()
+            .any(|l| l.contains("Instruction: VaultTransactionExecute")),
+        "real Squads v4 binary did not dispatch our vault_transaction_execute discriminator;\nlogs: {real_logs:#?}"
+    );
+
+    // Bogus discriminator → no such instruction → never logs the handler name.
+    let bogus = Instruction {
+        program_id: squads_id(),
+        accounts: vec![AccountMeta::new(payer.pubkey(), true)],
+        data: vec![0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03, 0x04],
+    };
+    let bogus_logs = send_capture_logs(&mut svm, &payer, bogus);
+    assert!(
+        !bogus_logs
+            .iter()
+            .any(|l| l.contains("Instruction: VaultTransactionExecute")),
+        "a bogus discriminator was (impossibly) dispatched as vault_transaction_execute;\nlogs: {bogus_logs:#?}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1c. Squads v4 vault-PDA seed derivation is self-consistent (F6 seam).
+//     The DAO execution authority is `[b"multisig", multisig, b"vault", [0]]`
+//     under SQDS4…, where `multisig` is `[b"multisig", b"multisig", dao]`. These
+//     are the seeds Kassandra records as `Protocol.dao_authority`; the gate test
+//     in `tests/governance_seam.rs` proves the Kassandra side end-to-end.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn squads_vault_pda_derivation() {
+    let dao = Pubkey::new_unique().to_bytes();
+    let (multisig, _) =
+        Pubkey::find_program_address(&md6::squads_multisig_seeds(&dao), &squads_id());
+    let multisig_arr = multisig.to_bytes();
+    let (vault, _vbump) = Pubkey::find_program_address(
+        &md6::squads_vault_seeds(&multisig_arr, &[0u8]),
+        &squads_id(),
+    );
+    // Re-derivation is stable.
+    let (vault2, _) = Pubkey::find_program_address(
+        &md6::squads_vault_seeds(&multisig_arr, &[0u8]),
+        &squads_id(),
+    );
+    assert_eq!(vault, vault2);
+    assert_ne!(vault, multisig);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
