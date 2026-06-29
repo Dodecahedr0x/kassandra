@@ -128,15 +128,16 @@ pub struct Oracle {
     // with the loud `CLAIM_OPTION_NONE` (0xFF) sentinel, so a consumer that
     // forgets to gate on `phase == Resolved` reads `0xFF` rather than a plausible
     // "option 0 won." Before finalize (any non-terminal phase) it is its zeroed
-    // default and must not be read. Absorbs the former `_pad1[1]`, so
-    // Oracle::LEN stays 232.
+    // default and must not be read. (Originally absorbed the former `_pad1[1]`;
+    // Oracle has since grown — see the struct docstring for the current LEN.)
     pub resolved_option: u8,
     // Number of OPEN (created-but-not-yet-settled) challenge decision markets.
     // `open_challenge` does `checked_add(1)` when it creates a Market;
     // `settle_challenge` does `checked_sub(1)` when it sets `market.settled`.
     // Task 12's `finalize_oracle` REQUIRES this == 0 before recomputing the
     // final plurality, so an unsettled challenged proposer can never be wrongly
-    // counted as surviving. Fits in the former `_pad1` — Oracle::LEN stays 232.
+    // counted as surviving. (Originally fit the former `_pad1`; Oracle has since
+    // grown — see the struct docstring for the current LEN.)
     pub open_challenge_count: u16,
     pub prompt_hash: [u8; 32], // hash of fixed prompt + interpretation
     // ---- Governable params snapshotted from `Protocol` at create_oracle (F2) -

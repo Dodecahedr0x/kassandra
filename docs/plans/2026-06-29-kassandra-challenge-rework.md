@@ -70,7 +70,9 @@ TDD; `just build` before `cargo test`; clippy + fmt clean; commit trailer `Co-Au
 ---
 
 ## Out of scope (later)
-- Staker settlement (per-staker claim/return/reward, emissions) — the broader settlement note. The challenger KASS-fee / proposer USDC-fee land where that milestone's claim model expects (document the hand-off precisely).
+- Staker settlement (per-staker claim/return/reward, emissions) — the broader settlement note. The challenger KASS-fee / proposer USDC-fee land where that milestone's claim model expects.
+- **CONTRACT for the staker-settlement milestone (from the C-final review):** after this rework, **`total_oracle_stake` is an IDEALIZED accumulator, NOT physical KASS.** A successful challenge sends `kass_fee` physically OUT of the protocol to the challenger but deliberately does NOT decrement `total_oracle_stake` (same as `open_challenge` not decrementing it for the bond split). So physically-distributable KASS = `total_oracle_stake − Σ kass_fee` (and can be *inflated* by external donations into the conditional holders / escrow). **Settlement MUST source payouts from the real `stake_vault` / `bond_pool` balances and the per-proposer `slashed_amount` ledger — never from `total_oracle_stake`, and never from live token-account balances (which donations can move either way).** The per-proposer identity `slashed_amount == bond_pool contribution == bond − kass_fee` is the authoritative figure.
+- **Deferred rent reclamation:** `settle_challenge` sets `market.settled=1` but does NOT close the `Market` PDA or the new `challenger_usdc_vault` escrow — the challenger's rent stays locked until a settlement-era close instruction (mirrors the Proposer/Fact non-closure convention).
 - Migrating challenge markets to v0.6/Meteora (kept on v0.4 for the TWAP).
 
 ## Execution note
