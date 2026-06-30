@@ -64,3 +64,30 @@ After each task: `just build` + `cargo test -p kassandra-program` green; default
 **Tests:** `deadend_settlement.rs` (no-facts dead-end burns bonds+emission & claims 0; tie-with-slashes burns bond_pool & survivors get `bond − slashed`; governance-resolved drains identically). `invariants.rs` Arm F `slashed_deadend_settlement_conservation` fuzz (fuzzed challenge-disqualify + flip-slash + emission, plain AND governance-resolved, full conservation incl. `kass_fee_out`); Arm A updated for the dead-end burn (vault + bond_pool == total_oracle_stake on a dead-end). `claims.rs` `invalid_deadend_returns_nonslashed_principal` + `flipped_survivor_invalid_deadend_drains` updated to the burn semantics (rejected forfeits; vault drains, no stranding). Harness `seed_terminal_oracle` InvalidDeadend models the post-burn vault (`gross − slashed_pool`, `bond_pool` stamped); `seed_disputed_oracle`/`fund_kass` back vault KASS with mint supply so the real `Burn` has supply to subtract.
 
 **Status:** `just build` + `cargo test -p kassandra-program` (35 bins, incl. new tests + fuzz) green; `cargo clippy` clean; `cargo fmt` applied; `cd sdk && pnpm typecheck` + `pnpm test` (88) green.
+
+## DS2 delta log (DONE)
+
+**Closed the one DS1-review coverage gap: the dead-end FACT/VOTE claim path is now proven by a REAL on-chain finalize-burn-then-claim, not just by logic + the Arm E harness mirror.**
+
+- **New end-to-end test (`settlement_e2e.rs`, real driven path):** `drive_real_fact_vote_deadend` drives the GENUINE front door — `create_oracle → propose×2 (options 0/1) → finalize_proposals → submit_fact×2 → advance_phase → vote_fact×2 → finalize_facts → submit_ai_claim×2 → finalize_ai_claims → finalize_oracle` (only `warp` moves time) — to a Tie dead-end carrying: an **AGREED fact** (approve 2000 clears the 2/3 quorum of `dispute_bond_total == 2000`), a **REJECTED fact** (approve 501 < 1334 quorum, > 0 duplicate) whose lone approve-voter is slashed, and two survivors claiming DISTINCT options (no flip → no proposer slash). A fuzzed-free, deterministic case sized so the rejected approve stake (501) is **ODD** to exercise the floor-vs-ceil margin.
+  - `finalize_facts` credits `bond_pool` with the rejected submitter stake (300) + the FLOOR aggregate voter slash `floor(501·1/2) == 250` → `bond_pool == 550` (asserted on-chain). `finalize_oracle` then BURNS `bond_pool + reward_emission` (emission 600 folded in before the terminal finalize).
+  - **Claims asserted (real S2):** agreed approve-voter → full stake (2000); agreed submitter → full stake (400); **rejected approve-voter → `stake − ceil(501·1/2) == 501 − 251 == 250`**; **rejected submitter → 0** (still closes + reclaims rent); survivors → `bond − slashed_amount == 1000` each.
+  - **Conservation proven end-to-end:** post-burn vault `== Σ stakes − bond_pool`; supply drops by exactly `bond_pool + emission`; the vault drains to **dust == `ceil(501·1/2) − floor(501·1/2) == 1`** (the per-voter ceil-margin — conservation-SAFE, the vault is never short); full equation `Σ returned + dust + bond_pool_burned + emission_burned == Σ stakes + emission` holds.
+- **Both terminal phases covered (real driven):** `e2e_fact_vote_deadend_burns_and_drains_real_dispute` (plain `InvalidDeadend`, `resolved_option == CLAIM_OPTION_NONE`) and `e2e_fact_vote_deadend_governance_resolved_pays_identically` (after `resolve_deadend(option) → Resolved`, `reward_pool == 0`, IDENTICAL payouts + identical dust — the no-marker insight now also proven on the fact/vote path).
+- **No conservation bug surfaced:** driving the real rejected-fact + slashed-voter Tie dead-end produced bounded dust (== 1, the ceil-margin), never a shortfall. DS1's burn + claims-formula fix is sound end-to-end.
+- **No program change** (DS2 is test + docs only). No SDK change beyond DS1's already-threaded `finalize_facts` ABI. Normal-Resolved tests stay green.
+
+**Docs:** updated `docs/plans/2026-06-29-kassandra-settlement-economics.md` (the `InvalidDeadend` row rewritten to the burn-slashed-`bond_pool`-+-emission / return-non-slashed-principal rule + a DONE note with the USER DECISION, governance-drains-identically, the claims-formula fix, and the `finalize_facts` ABI note) and `docs/plans/2026-06-30-kassandra-staker-settlement.md` (a "dead-end settlement follow-up (DONE)" section in its covered-vs-deferred).
+
+## Dead-end settlement: covered vs deferred (final)
+
+**Covered (real instructions, proven end to end):**
+- The burn rule at both `InvalidDeadend` finalize sites: `finalize_oracle` (tie / no-survivors) and `finalize_no_facts` burn the slashed `bond_pool` + `reward_emission`; the vault then holds exactly the returnable non-slashed principal.
+- The full per-actor dead-end matrix via REAL claims: survivor `bond − slashed_amount`; disqualified → 0; agreed/duplicate fact submitter + voter → stake; rejected submitter → 0; approve-on-rejected → `stake − ceil(slash)`.
+- The no-facts USER DECISION (every proposer's bond burned), the tie-with-proposer-slashes path, AND the tie-with-fact/vote-slashes path (rejected fact + slashed approve-voter + agreed fact) — both proposer-slash and fact/vote-slash conservation now driven by real instructions.
+- Governance-resolved (`resolve_deadend`) drains IDENTICALLY on both the proposer-slash and fact/vote paths (no marker / no layout / no claims branch — `reward_pool == 0`).
+- Conservation incl. the floor-credit-vs-ceil-forfeit margin (bounded, never short) — `deadend_settlement.rs`, `settlement_e2e.rs`, `invariants.rs` Arms E/F.
+
+**Deferred to the NEXT milestone:**
+- Dust sweeping / closing the terminal Oracle + `stake_vault` accounts (the conservation-safe sub-unit dust + reclaimable rent remain).
+- Any change to the normal (non-dead-end) Resolved economics.

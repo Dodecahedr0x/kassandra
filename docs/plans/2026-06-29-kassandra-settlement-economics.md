@@ -49,8 +49,38 @@ challenge-market portion depends on a KASS price oracle (futarchy) that does not
     slashed fraction was added to `bond_pool` by `finalize_facts` at finalize time (no per-vote iteration:
     it uses the rejected fact's aggregate `approve_stake`) |
 
-- **`InvalidDeadend`:** every staker reclaims full stake; no rewards; `reward_emission` burned;
-  creator fee stays burned.
+- **`InvalidDeadend`:** a non-outcome — **no rewards, no distribution**. Stakers reclaim their
+  **non-slashed principal**; all **slashed amounts (`bond_pool`) are BURNED** along with the
+  `reward_emission`; the creator fee stays burned. (BUILT — see the dead-end-settlement note below;
+  this supersedes the earlier "every staker reclaims full stake" sketch, which mis-modelled the
+  slashed-then-deadend case.) Concretely, per actor on a dead-end:
+  - Survivor proposer → `bond − slashed_amount` (honest → full bond; flip-slashed → only the
+    un-slashed remainder); disqualified proposer → 0 (its bond was in the burned `bond_pool`, and a
+    challenge-disqualify already paid the `kass_fee` out).
+  - Agreed / duplicate-dominant fact submitter + voter → full stake (no reward).
+  - **Rejected-fact submitter → 0**; **approve-voter on a rejected fact → `stake − ceil(stake·
+    FACT_VOTE_SLASH_NUM/DEN)`** — the slashed fraction funded the now-burned `bond_pool`. The
+    aggregate credited to `bond_pool` at finalize is the FLOOR `floor(Σ approve·num/den)`; the
+    per-voter forfeit is the CEIL, so the vault retains bounded conservation-safe dust (never short).
+
+> **Dead-end economic settlement — DONE (2026-07-01).** The dead-end gap is closed: the slashed
+> `bond_pool` (disqualified bonds + rejected-fact submitter stakes + rejected-fact approve-voter
+> slashes) + the `reward_emission` are BURNED at the `InvalidDeadend` finalize sites (`finalize_oracle`
+> tie/no-survivors branch; `finalize_facts` no-facts branch), leaving the vault holding exactly the
+> returnable non-slashed principal for the S2 pull-claims to drain to dust. **USER DECISION:** on the
+> no-facts dead-end, every disputing proposer's bond is BURNED (no recipient — a deterrent against
+> propose-conflict-then-abandon), not redistributed. **Governance-resolved path drains IDENTICALLY:**
+> a `resolve_deadend(option)` flips `InvalidDeadend → Resolved` and records `resolved_option`, but
+> `reward_pool == 0` zeroes every reward term, so claims pay non-slashed principal only on BOTH
+> terminal phases — **no marker, no layout change, no claims branch** needed. **Claims-formula fix:**
+> `claim_fact` / `claim_fact_vote` apply the fact disposition (rejected submitter → 0, approve-on-
+> rejected → `stake − ceil(slash)`, agreed/duplicate → stake) on BOTH terminal phases, matching
+> Resolved (the reward term is gated to Resolved and is 0 on a dead-end). **ABI note:** `finalize_facts`
+> gained an `oracle_nonce` payload + fixed `kass_mint`/`stake_vault`/token-program accounts (the burn
+> signer), mirroring `finalize_oracle`; threaded to the SDK `finalizeFacts` builder. Covered by
+> `deadend_settlement.rs`, `settlement_e2e.rs` (incl. the real-driven fact/vote dead-end tests
+> `e2e_fact_vote_deadend_*`), and the `invariants.rs` conservation fuzz (Arms E/F). DEFERRED to the
+> NEXT milestone: dust sweeping / closing the terminal Oracle + `stake_vault` accounts.
 
 - **Challengers:** paid by the challenge market (see deferred section) — a **KASS fee from the bond
   on success**; NOT from `bond_pool` directly.

@@ -577,3 +577,41 @@ Full suite **235 passed / 0 failed** (228 baseline + 5 e2e + 2 new fuzz arms);
 - KASS bootstrapping presale-avoidance beyond the emission curve; the runner/SDK/
   app; MetaDAO proposal-lifecycle on a real validator; v0.6 market migration
   (all per the original Out-of-scope).
+
+---
+
+## Dead-end settlement follow-up (DONE — separate milestone, 2026-07-01)
+
+S2 originally returned **full stake** to rejected-fact submitters / slashed
+approve-voters on `InvalidDeadend` (the "every staker reclaims full stake" sketch),
+and the slashed `bond_pool` was never moved out of the vault on a tie/no-survivor
+or no-facts dead-end → **stranded KASS**. The dead-end-settlement milestone closed
+that (see `docs/plans/2026-06-30-kassandra-deadend-settlement.md`):
+
+- **Burn rule:** the `InvalidDeadend` finalize sites BURN the slashed `bond_pool`
+  (disqualified bonds + rejected-fact submitter stakes + rejected-fact approve-voter
+  slashes) + the `reward_emission` from `stake_vault` (oracle-PDA-signed). The vault
+  then holds exactly the returnable non-slashed principal; the S2 claims drain it.
+  `finalize_oracle` (tie/no-survivors) + `finalize_no_facts` both burn.
+- **USER DECISION:** no-facts dead-end burns every disputing proposer's bond (no
+  recipient; deterrent against propose-conflict-then-abandon).
+- **Claims-formula fix:** `claim_fact` / `claim_fact_vote` apply the fact
+  disposition on BOTH terminal phases (rejected submitter → 0, approve-on-rejected →
+  `stake − ceil(slash)`, agreed/duplicate → stake), reward gated to Resolved (0 on a
+  dead-end). `claim_proposer` was already correct (`bond − slashed_amount`).
+- **Governance-resolved drains identically:** `resolve_deadend` flips
+  `InvalidDeadend → Resolved` + records `resolved_option` but moves no tokens;
+  `reward_pool == 0` zeroes every reward term → same payouts on both phases. **No
+  marker, no layout change, no claims branch.**
+- **ABI:** `finalize_facts` gained an `oracle_nonce` payload + fixed
+  `kass_mint`/`stake_vault`/token-program accounts (the burn signer), mirroring
+  `finalize_oracle`; threaded to the SDK `finalizeFacts` builder.
+- **Coverage:** `deadend_settlement.rs` (no-facts / tie-with-slashes / governance-
+  resolved), `settlement_e2e.rs` real-driven fact/vote dead-end tests
+  (`e2e_fact_vote_deadend_burns_and_drains_real_dispute` +
+  `e2e_fact_vote_deadend_governance_resolved_pays_identically` — a REAL dispute
+  driven to a Tie dead-end with a rejected fact + a slashed approve-voter + an agreed
+  fact, then claimed; proves the floor-credit-vs-ceil-forfeit dust is conservation-
+  safe end-to-end, plain AND governance-resolved), and `invariants.rs` Arms E/F.
+- **Still deferred:** dust sweeping / closing the terminal Oracle + `stake_vault`
+  accounts — the NEXT milestone.
