@@ -90,9 +90,9 @@ pub enum Ix {
     ClaimFactVote = 19,
     /// Permissionless rent-reclaim close for ONE `AiClaim` after the oracle is
     /// terminal (Task S4): the `AiClaim` holds no tokens, so this only drains its
-    /// rent lamports to the proposer's authority (read from the still-present
-    /// `Proposer` account) and CLOSES it. Idempotent by closure. MUST run before
-    /// `claim_proposer` closes the `Proposer` it reads the authority from.
+    /// rent lamports to `ai_claim.authority` (stamped at submit) and CLOSES it.
+    /// Order-INDEPENDENT — it does not load the `Proposer`, so it works whether or
+    /// not `claim_proposer` has already run. Idempotent by closure.
     CloseAiClaim = 20,
     /// Permissionless rent-reclaim close for ONE settled challenge `Market` +
     /// its `challenger_usdc_vault` escrow (Task S4): once the oracle is terminal
