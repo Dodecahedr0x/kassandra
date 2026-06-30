@@ -1954,13 +1954,15 @@ impl TestCtx {
 
     // ----- S4: account-closure (close_ai_claim / close_market) helpers -------
 
-    /// Fabricate an [`AiClaim`] bound to `oracle` + `proposer`. Returns its
+    /// Fabricate an [`AiClaim`] bound to `oracle` + `proposer`, stamping
+    /// `authority` (the rent recipient close_ai_claim reads). Returns its
     /// (random) address.
-    pub fn seed_ai_claim(&mut self, oracle: Pubkey, proposer: Pubkey) -> Pubkey {
+    pub fn seed_ai_claim(&mut self, oracle: Pubkey, proposer: Pubkey, authority: Pubkey) -> Pubkey {
         let mut c = AiClaim::zeroed();
         c.account_type = AccountType::AiClaim.as_u8();
         c.oracle = oracle.to_bytes();
         c.proposer = proposer.to_bytes();
+        c.authority = authority.to_bytes();
         self.seed_program_account(bytemuck::bytes_of(&c).to_vec())
     }
 
@@ -1989,13 +1991,11 @@ impl TestCtx {
     }
 
     /// Build a `CloseAiClaim` instruction (Ix 20). Account order:
-    /// `[0] oracle(ro) [1] ai_claim(w) [2] proposer(ro) [3] rent_recipient(w)`.
-    /// Empty payload.
+    /// `[0] oracle(ro) [1] ai_claim(w) [2] rent_recipient(w)`. Empty payload.
     pub fn close_ai_claim_ix(
         &self,
         oracle: Pubkey,
         ai_claim: Pubkey,
-        proposer: Pubkey,
         rent_recipient: Pubkey,
     ) -> Instruction {
         Instruction {
@@ -2003,7 +2003,6 @@ impl TestCtx {
             accounts: vec![
                 AccountMeta::new_readonly(oracle, false),
                 AccountMeta::new(ai_claim, false),
-                AccountMeta::new_readonly(proposer, false),
                 AccountMeta::new(rent_recipient, false),
             ],
             data: vec![kassandra_program::instruction::Ix::CloseAiClaim as u8],

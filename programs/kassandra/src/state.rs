@@ -311,7 +311,7 @@ impl FactVote {
     pub const LEN: usize = core::mem::size_of::<FactVote>();
 }
 
-/// A pinned-model AI claim for a proposer's option. `size_of == 176`.
+/// A pinned-model AI claim for a proposer's option. `size_of == 208`.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct AiClaim {
@@ -326,6 +326,14 @@ pub struct AiClaim {
     pub challenged: u8, // bool
     pub bump: u8,
     pub _pad: [u8; 5],
+    // The proposer's HUMAN authority (== `proposer.authority`), stamped at submit
+    // by `submit_ai_claim`. Recorded on the claim itself so the settlement-era
+    // `close_ai_claim` (Task S4) routes the reclaimed rent to the authority
+    // DIRECTLY — without loading the `Proposer` account, which `claim_proposer`
+    // may have already closed. Makes the close ORDER-INDEPENDENT (rent never
+    // stranded). Appended at offset 176 (clean ABI addition; all prior offsets
+    // unchanged).
+    pub authority: Pubkey,
 }
 
 impl AiClaim {

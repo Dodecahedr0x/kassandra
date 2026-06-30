@@ -150,6 +150,9 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     claim.option = args.option;
     claim.challenged = 0;
     claim.bump = bump;
+    // Record the proposer's human authority (== proposer.authority, asserted
+    // above) so close_ai_claim can reclaim rent to it without the Proposer.
+    claim.authority = *authority_ai.key();
     {
         let mut data = claim_ai.try_borrow_mut_data()?;
         data.copy_from_slice(bytemuck::bytes_of(&claim));

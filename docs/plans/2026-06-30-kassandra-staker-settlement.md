@@ -435,3 +435,31 @@ challenger), `unsettled_fails` (`MarketNotSettled`), `nonempty_escrow_fails`
 (`WrongPhase`). New harness helpers: `seed_ai_claim`, `seed_market`,
 `seed_usdc_escrow`, `close_ai_claim_ix`, `close_market_ix`, `airdrop`. Full suite
 **227 passed / 0 failed**; clippy `--all-targets` clean; fmt applied.
+
+### S4 review fix — store `authority` on `AiClaim` (close_ai_claim never strands rent) (DONE)
+
+**Finding:** the first cut of `close_ai_claim` routed rent to `proposer.authority`
+read from the LIVE `Proposer`, but `claim_proposer` closes the `Proposer` with no
+outstanding-AiClaim guard — so cranking `claim_proposer` first permanently
+stranded the AiClaim's rent (~0.0016 SOL, the proposer's own), and the doc wrongly
+implied the ordering was merely a convention.
+
+**Fix (order-independent, no Proposer dependency):**
+- **`AiClaim` layout re-pinned** `176 → 208`: appended `authority: Pubkey @176`
+  (the proposer's human authority). Clean ABI addition — all prior offsets
+  unchanged. `tests/state_layout.rs` updated (LEN 208 + offset 176).
+- **`submit_ai_claim`** now stamps `claim.authority = *authority_ai.key()` (==
+  `proposer.authority`, already asserted at submit). Harness `seed_ai_claim` gained
+  an `authority` param; the `settle_challenge.rs` AiClaim fabricator needs no change
+  (never reads `authority`; the larger zeroed struct seeds fine).
+- **`close_ai_claim` rewritten** to bind `rent_recipient == ai_claim.authority`
+  DIRECTLY and DROP the `Proposer` account. New account order: `[0] oracle(ro,
+  terminal) [1] ai_claim(w, closed) [2] rent_recipient(w == ai_claim.authority)`.
+  Empty payload. Works regardless of whether `claim_proposer` already closed the
+  Proposer; rent never stranded. Doc fixed to state the truth (order-independent).
+- **New test** `close_ai_claim_after_proposer_closed_still_reclaims`: cranks
+  `claim_proposer` (closing the Proposer) THEN `close_ai_claim` → AiClaim rent
+  still reclaimed to `authority`. Other closure tests updated for the simplified
+  account list.
+
+Full suite **228 passed / 0 failed**; clippy `--all-targets` clean; fmt applied.

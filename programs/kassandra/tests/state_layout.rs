@@ -19,7 +19,7 @@ fn account_sizes_are_stable() {
     assert_eq!(Proposer::LEN, 96);
     assert_eq!(Fact::LEN, 336);
     assert_eq!(FactVote::LEN, 88);
-    assert_eq!(AiClaim::LEN, 176);
+    assert_eq!(AiClaim::LEN, 208);
     assert_eq!(Market::LEN, 416);
     assert_eq!(Protocol::LEN, 368);
 }
@@ -81,6 +81,8 @@ fn field_offsets_are_pinned() {
     assert_eq!(offset_of!(FactVote, stake), 72);
 
     assert_eq!(offset_of!(AiClaim, io_hash), 136);
+    // S4: `authority` appended at offset 176 (clean ABI addition; LEN 176 → 208).
+    assert_eq!(offset_of!(AiClaim, authority), 176);
 
     // Market: 9 pubkeys packed after the 8-byte header, then the i64/u64 tail.
     assert_eq!(offset_of!(Market, oracle), 8);

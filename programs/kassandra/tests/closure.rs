@@ -50,21 +50,54 @@ fn close_ai_claim_after_resolved_reclaims_rent() {
     let seed = terminal_with_proposer(&mut ctx);
     let p = &seed.proposers[0];
     let recip = p.authority.pubkey();
-    let ai_claim = ctx.seed_ai_claim(seed.oracle, p.account);
+    let ai_claim = ctx.seed_ai_claim(seed.oracle, p.account, recip);
 
     let claim_rent = ctx.lamports(ai_claim);
     let recip_before = ctx.lamports(recip);
     assert!(claim_rent > 0);
 
-    let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, p.account, recip);
+    let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, recip);
     ctx.send(ix, &[]).unwrap();
 
     assert!(ctx.is_closed(ai_claim), "ai_claim should be closed");
     assert_eq!(
         ctx.lamports(recip),
         recip_before + claim_rent,
-        "rent → proposer authority",
+        "rent → ai_claim.authority",
     );
+}
+
+/// The previously-stranding order: `claim_proposer` CLOSES the Proposer first,
+/// then `close_ai_claim` still reclaims the AiClaim's rent — the recipient comes
+/// from `ai_claim.authority`, not the (now-gone) Proposer.
+#[test]
+fn close_ai_claim_after_proposer_closed_still_reclaims() {
+    let mut ctx = TestCtx::new();
+    let seed = terminal_with_proposer(&mut ctx);
+    let p = &seed.proposers[0];
+    let recip = p.authority.pubkey();
+    let ai_claim = ctx.seed_ai_claim(seed.oracle, p.account, recip);
+
+    // Crank claim_proposer → the Proposer account is closed FIRST.
+    let claim_ix = ctx.claim_proposer_ix(
+        seed.oracle,
+        seed.nonce,
+        p.account,
+        p.dest_kass,
+        seed.stake_vault,
+        recip,
+    );
+    ctx.send(claim_ix, &[]).unwrap();
+    assert!(ctx.is_closed(p.account), "proposer closed first");
+
+    // close_ai_claim still works (no Proposer dependency).
+    let claim_rent = ctx.lamports(ai_claim);
+    let recip_before = ctx.lamports(recip);
+    let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, recip);
+    ctx.send(ix, &[]).unwrap();
+
+    assert!(ctx.is_closed(ai_claim));
+    assert_eq!(ctx.lamports(recip), recip_before + claim_rent);
 }
 
 #[test]
@@ -72,11 +105,12 @@ fn close_ai_claim_non_terminal_fails() {
     let mut ctx = TestCtx::new();
     let seed = terminal_with_proposer(&mut ctx);
     let p = &seed.proposers[0];
+    let recip = p.authority.pubkey();
     // Force a non-terminal phase.
     ctx.set_phase(seed.oracle, Phase::Challenge);
-    let ai_claim = ctx.seed_ai_claim(seed.oracle, p.account);
+    let ai_claim = ctx.seed_ai_claim(seed.oracle, p.account, recip);
 
-    let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, p.account, p.authority.pubkey());
+    let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, recip);
     assert_eq!(
         ctx.send(ix, &[]).unwrap_err().err,
         custom(KassandraError::WrongPhase)
@@ -88,14 +122,15 @@ fn close_ai_claim_double_close_fails() {
     let mut ctx = TestCtx::new();
     let seed = terminal_with_proposer(&mut ctx);
     let p = &seed.proposers[0];
-    let ai_claim = ctx.seed_ai_claim(seed.oracle, p.account);
+    let recip = p.authority.pubkey();
+    let ai_claim = ctx.seed_ai_claim(seed.oracle, p.account, recip);
 
-    let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, p.account, p.authority.pubkey());
+    let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, recip);
     ctx.send(ix, &[]).unwrap();
     assert!(ctx.is_closed(ai_claim));
 
     // Second close: the account is gone → load guard fails.
-    let ix2 = ctx.close_ai_claim_ix(seed.oracle, ai_claim, p.account, p.authority.pubkey());
+    let ix2 = ctx.close_ai_claim_ix(seed.oracle, ai_claim, recip);
     assert_eq!(
         ctx.send(ix2, &[]).unwrap_err().err,
         custom(KassandraError::InvalidAccount),
@@ -107,11 +142,12 @@ fn close_ai_claim_other_oracle_fails() {
     let mut ctx = TestCtx::new();
     let seed = terminal_with_proposer(&mut ctx);
     let p = &seed.proposers[0];
+    let recip = p.authority.pubkey();
     // AiClaim bound to a DIFFERENT oracle than the one passed in.
     let other_oracle = solana_sdk::pubkey::Pubkey::new_unique();
-    let ai_claim = ctx.seed_ai_claim(other_oracle, p.account);
+    let ai_claim = ctx.seed_ai_claim(other_oracle, p.account, recip);
 
-    let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, p.account, p.authority.pubkey());
+    let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, recip);
     assert_eq!(
         ctx.send(ix, &[]).unwrap_err().err,
         custom(KassandraError::InvalidAccount),
