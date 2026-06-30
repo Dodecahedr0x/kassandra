@@ -1,0 +1,29 @@
+[package]
+name = "kassandra-runner"
+version = "0.1.0"
+edition = "2021"
+description = "Off-chain, reproducible AI runner for Kassandra oracles: assembles the pinned prompt + agreed facts, calls a model behind a generic provider trait, and emits the on-chain claim metadata (model_id/params_hash/io_hash + option)."
+
+[lib]
+name = "kassandra_runner"
+
+[[bin]]
+name = "kassandra-runner"
+path = "src/main.rs"
+
+[dependencies]
+# Reuse the on-chain program's constants + account layouts (CLAIM_OPTION_NONE,
+# the AiClaim field widths) so there is no cross-language drift. The
+# `no-entrypoint` feature gates off pinocchio's program entrypoint (global
+# allocator + panic handler) so the crate is usable as a plain host library.
+kassandra-program = { path = "../programs/kassandra", features = ["no-entrypoint"] }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "2"
+async-trait = "0.1"

@@ -66,3 +66,11 @@ The program stores three 32-byte hashes in `AiClaim` (`model_id[32]`, `params_ha
 
 ## Execution note
 After each task: build + `cargo test -p kassandra-runner` + clippy + fmt green, commit. R0 (program-crate sharing) + R1 (the hashing contract) are the crux — get the hashing byte-exact + documented so a challenger reproduces it. The program is read-only truth. Append an R0–R5 delta log here.
+
+## Delta log
+
+### R0 — done
+- Scaffolded `runner/` (crate `kassandra-runner`, edition 2021) + added it to the workspace `members`. Lib + bin (`src/main.rs` is a R4 stub). Deps: tokio, reqwest (rustls-tls, json), sha2, serde, serde_json, clap, anyhow, thiserror, async-trait, plus `kassandra-program` (path dep).
+- **Recon decision: DEPEND on `kassandra-program`** (with `features = ["no-entrypoint"]`), NOT mirror. The program's host `lib` target builds cleanly + light (pinocchio/bytemuck/five8; solana-sdk/litesvm are dev-deps only). `runner/src/constants.rs` re-exports `CLAIM_OPTION_NONE` and pins the `submit_ai_claim` payload widths to the actual `AiClaim` field offsets via `offset_of!` compile-time asserts (drift → build failure). Details + the canonical-hash-module recommendation (keep it in the runner as the reference, since the program doesn't compute hashes and is read-only) in `runner/NOTES.md`.
+- **Verified payload layout** against `submit_ai_claim.rs`: `model_id[32] ++ params_hash[32] ++ io_hash[32] ++ option u8` = 97 bytes exact; `option < options_count`; PDA seeds `[b"claim", oracle, proposer]`.
+- `AiProvider` trait (`async fn complete`, via `async-trait`) + `CompletionRequest`/`CompletionResponse`/`ModelConfig`/`CategoricalOptions` types + deterministic `MockProvider`. Smoke test + unit tests green (6 tests). clippy/fmt clean; program crate untouched + still builds.

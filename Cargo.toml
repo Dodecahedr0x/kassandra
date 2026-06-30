@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["programs/kassandra"]
+members = ["programs/kassandra", "runner"]
 
 [workspace.dependencies]
 pinocchio = "0.8"
