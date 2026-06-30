@@ -1,0 +1,13 @@
+{
+  "option_index": 0,
+  "model_id_hex": "52b9ff92b8e55df1a4a40ccde160aeec597f4463557f22af1d98be5dfd72aad7",
+  "params_hash_hex": "b2d691308fbb05648789523a8de7cab105912c35591e900b3d8e32d59d128ba9",
+  "io_hash_hex": "070237266848be14c344f40b9f6c03dd7410f8fc55360327b68a1b0459d40ca6",
+  "submit_ai_claim_payload_hex": "52b9ff92b8e55df1a4a40ccde160aeec597f4463557f22af1d98be5dfd72aad7b2d691308fbb05648789523a8de7cab105912c35591e900b3d8e32d59d128ba9070237266848be14c344f40b9f6c03dd7410f8fc55360327b68a1b0459d40ca600",
+  "resolved_model_id": "mock-model",
+  "claim_pda_seeds": {
+    "seed_prefix": "claim",
+    "oracle": "GuBhyNi5GFo9K5YXGKfPMDryWK8GwS5oXe9CJGrzo2sk",
+    "proposer": "84yVtdReAJ8GiR7Erqj7jyxoJurYWzQ6n9eaBGYBDNqM"
+  }
+}

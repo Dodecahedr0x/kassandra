@@ -1,0 +1,11 @@
+{
+  "interpretation": "Resolve YES if BTC closed above $100k on 2025-12-31; otherwise NO.",
+  "options_count": 2,
+  "option_labels": [
+    { "index": 0, "label": "Yes" },
+    { "index": 1, "label": "No" }
+  ],
+  "facts": [],
+  "oracle": "GuBhyNi5GFo9K5YXGKfPMDryWK8GwS5oXe9CJGrzo2sk",
+  "proposer": "84yVtdReAJ8GiR7Erqj7jyxoJurYWzQ6n9eaBGYBDNqM"
+}

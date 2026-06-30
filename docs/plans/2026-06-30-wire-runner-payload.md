@@ -40,5 +40,14 @@
 - Driving the full dispute pipeline in the SDK if W2 seeds the precondition instead (note it as covered-by-the-Rust-suite).
 - Any change to the runner or the program (read-only).
 
+## W1 delta (done)
+
+- **Bridge:** `sdk/src/runner-bridge.ts` — `submitAiClaimFromRunner(runOutput | json, { oracle, proposer, authority, programId? })` + the `RunnerOutput` interface (mirrors `RunOutput`). Exported from the barrel (`sdk/src/index.ts`). Accepts a parsed object or a JSON string; hex-decodes the three hashes (32-byte width validated), builds `submitAiClaim`, then the **parity guard**: asserts `data.length === 98`, `data[0] === Ix.SubmitAiClaim`, and `data.slice(1, 98)` byte-equals `hex(submit_ai_claim_payload_hex)` (97 bytes) — throwing a specific error naming the first differing byte on drift. If `claim_pda_seeds` is present, asserts `seed_prefix === "claim"` and its oracle/proposer (base58, normalized via `Address`) equal the passed ones.
+- **Genuine fixture:** built the runner (`cargo build -p kassandra-runner`) and captured real output:
+  - Config `sdk/test/fixtures/runner-config.json`: 2 options (Yes/No), **zero agreed facts** (so no live HTTP fetch needed), oracle/proposer base58 set (so `claim_pda_seeds` is emitted).
+  - Command: `./target/debug/kassandra-runner run --mock --config sdk/test/fixtures/runner-config.json > sdk/test/fixtures/runner-output.json`. The `--mock` provider is deterministic (option 0), so the fixture is reproducible. Output is genuine Rust encoding (not TS-authored), so the parity test isn't circular.
+- **Tests:** `sdk/test/runner-bridge.test.ts` (6, all green): (a) `data == [Ix.SubmitAiClaim, ...payload_hex]` parity holds against the genuine fixture; JSON-string input accepted; (b) account order/roles with aiClaim PDA `[b"claim", oracle, proposer]`; (c) a tampered `model_id_hex` byte makes the parity guard THROW; (d) wrong-width hash hex throws; (e) `claim_pda_seeds` oracle mismatch throws.
+- **Verification:** `pnpm typecheck` clean; `pnpm test` 71 passed (8 files, incl. the existing litesvm suite after `cargo build-sbf` produced `target/deploy/kassandra_program.so`). Scope held — no W2 litesvm e2e.
+
 ## Execution note
 After each task: `cd sdk && pnpm typecheck && pnpm test` green (+ `just build` for the .so before W2's litesvm test), commit. The PARITY GUARD (W1) is the core value — it makes runner↔SDK encoding drift a hard failure. W2 is the end-to-end proof. Append a W1/W2 delta here.
