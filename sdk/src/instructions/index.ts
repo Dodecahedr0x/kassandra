@@ -6,3 +6,6 @@
  */
 export * from "./payload.js";
 export * from "./lifecycle.js";
+export * from "./dispute.js";
+export * from "./challenge.js";
+export * from "./settlement.js";
