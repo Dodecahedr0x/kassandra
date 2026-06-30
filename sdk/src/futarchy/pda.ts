@@ -48,6 +48,11 @@ export function futarchyEventAuthority(): Promise<Pda> {
   return derive([SEED.eventAuthority], FUTARCHY_ID);
 }
 
+/** futarchy `AmmPosition` PDA — `[b"amm_position", dao, position_authority]`. */
+export function ammPosition(dao: AddressInput, positionAuthority: AddressInput): Promise<Pda> {
+  return derive([SEED.ammPosition, bytes(dao), bytes(positionAuthority)], FUTARCHY_ID);
+}
+
 // ── Squads v4 ─────────────────────────────────────────────────────────────────
 
 /** Squads multisig PDA — `[b"multisig", b"multisig", create_key]` (create_key == Dao). */

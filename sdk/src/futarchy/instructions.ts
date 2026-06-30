@@ -49,6 +49,11 @@ function u16le(v: number): Uint8Array {
   new DataView(o.buffer).setUint16(0, v, true);
   return o;
 }
+function i16le(v: number): Uint8Array {
+  const o = new Uint8Array(2);
+  new DataView(o.buffer).setInt16(0, v, true);
+  return o;
+}
 function u32le(v: number): Uint8Array {
   const o = new Uint8Array(4);
   new DataView(o.buffer).setUint32(0, v, true);
@@ -272,12 +277,23 @@ export interface InitializeDaoArgs {
   passThresholdBps: number;
   secondsPerProposal: number;
   nonce: bigint | number;
+  /**
+   * v0.6.1 trailing param `team_sponsored_pass_threshold_bps: i16` (default 0).
+   * The DEPLOYED program (0.6.1) added this after `initial_spending_limit`; the
+   * v0.6.0 source lacked it. Confirmed against the on-chain Anchor IDL.
+   */
+  teamSponsoredPassThresholdBps?: number;
+  /** v0.6.1 trailing param `team_address: Pubkey` (default the zero/system key). */
+  teamAddress?: AddressInput;
 }
 
 /**
  * `initialize_dao` (initial_spending_limit == None). Creates the Dao AND, via an
  * internal CPI, the Squads multisig with `create_key == Dao` + vault index 0
  * (see NOTES.md). All Squads/ATA PDAs are derived internally.
+ *
+ * Arg layout = v0.6.1 DEPLOYED (`InitializeDaoParams` + the two trailing
+ * `team_*` fields). 117 bytes for the None spending-limit case.
  */
 export async function initializeDao(a: InitializeDaoArgs): Promise<TransactionInstruction> {
   const dao = (await fpda.dao(a.daoCreator, a.nonce)).address;
@@ -301,6 +317,8 @@ export async function initializeDao(a: InitializeDaoArgs): Promise<TransactionIn
     u32le(a.secondsPerProposal),
     u64le(a.nonce),
     Uint8Array.from([0]), // Option<InitialSpendingLimit>::None
+    i16le(a.teamSponsoredPassThresholdBps ?? 0), // v0.6.1
+    addr(a.teamAddress ?? SYSTEM_PROGRAM_ID).toBytes(), // v0.6.1 team_address (default zero key)
   ]);
 
   return new TransactionInstruction({
@@ -332,6 +350,8 @@ export async function initializeDao(a: InitializeDaoArgs): Promise<TransactionIn
 export interface InitializeProposalArgs {
   /** The Squads proposal the futarchy proposal references (seeds the Proposal PDA). */
   squadsProposal: AddressInput;
+  /** The Squads multisig (v0.6.1 added it as an explicit account). */
+  squadsMultisig: AddressInput;
   dao: AddressInput;
   question: AddressInput;
   quoteVault: AddressInput;
@@ -348,6 +368,7 @@ export async function initializeProposal(a: InitializeProposalArgs): Promise<Tra
     keys: [
       w(proposal),
       ro(a.squadsProposal),
+      ro(a.squadsMultisig),
       w(a.dao),
       ro(a.question),
       ro(a.quoteVault),
@@ -376,6 +397,9 @@ export interface LaunchProposalArgs {
   ammPassQuoteVault: AddressInput;
   ammFailBaseVault: AddressInput;
   ammFailQuoteVault: AddressInput;
+  /** v0.6.1 added the Squads multisig + proposal as explicit accounts. */
+  squadsMultisig: AddressInput;
+  squadsProposal: AddressInput;
 }
 
 export async function launchProposal(a: LaunchProposalArgs): Promise<TransactionInstruction> {
@@ -396,6 +420,8 @@ export async function launchProposal(a: LaunchProposalArgs): Promise<Transaction
       w(a.ammPassQuoteVault),
       w(a.ammFailBaseVault),
       w(a.ammFailQuoteVault),
+      ro(a.squadsMultisig),
+      ro(a.squadsProposal),
       ro(SYSTEM_PROGRAM_ID),
       ro(TOKEN_PROGRAM_ID),
       ro(ATA_PROGRAM_ID),
@@ -567,6 +593,51 @@ export async function spotSwap(a: SpotSwapArgs): Promise<TransactionInstruction>
       u64le(a.inputAmount),
       u8b(a.swapType),
       u64le(a.minOutputAmount),
+    ]),
+  });
+}
+
+export interface ProvideLiquidityArgs {
+  dao: AddressInput;
+  liquidityProvider: AddressInput;
+  liquidityProviderBaseAccount: AddressInput;
+  liquidityProviderQuoteAccount: AddressInput;
+  payer: AddressInput;
+  ammBaseVault: AddressInput;
+  ammQuoteVault: AddressInput;
+  /** Position authority (seeds the AmmPosition PDA; usually == liquidityProvider). */
+  positionAuthority: AddressInput;
+  quoteAmount: bigint | number;
+  maxBaseAmount: bigint | number;
+  minLiquidity: bigint | number;
+}
+
+/** `provide_liquidity` — seeds the embedded spot AMM (first deposit needs `quote >= MIN_QUOTE_LIQUIDITY`). */
+export async function provideLiquidity(a: ProvideLiquidityArgs): Promise<TransactionInstruction> {
+  const eventAuthority = (await fpda.futarchyEventAuthority()).address;
+  const ammPosition = (await fpda.ammPosition(a.dao, a.positionAuthority)).address;
+  return new TransactionInstruction({
+    programId: addr(FUTARCHY_ID),
+    keys: [
+      w(a.dao),
+      ro(a.liquidityProvider, true),
+      w(a.liquidityProviderBaseAccount),
+      w(a.liquidityProviderQuoteAccount),
+      w(a.payer, true),
+      ro(SYSTEM_PROGRAM_ID),
+      w(a.ammBaseVault),
+      w(a.ammQuoteVault),
+      w(ammPosition),
+      ro(TOKEN_PROGRAM_ID),
+      ro(eventAuthority),
+      ro(FUTARCHY_ID),
+    ],
+    data: concat([
+      DISC.provideLiquidity,
+      u64le(a.quoteAmount),
+      u64le(a.maxBaseAmount),
+      u128le(a.minLiquidity),
+      addr(a.positionAuthority).toBytes(),
     ]),
   });
 }

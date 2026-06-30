@@ -124,5 +124,52 @@
 - **Verification:** `cd sdk && pnpm typecheck` clean, `pnpm build` clean,
   `pnpm test` → 88 offline (72 prior + 16 new) green. Program + runner untouched.
 
+### G3 — FULL futarchy governance loop on forked MetaDAO, FULLY REAL (DONE — headline proven)
+- **PROVEN end-to-end on forked mainnet** (`sdk/test/surfpool/futarchy-governance-e2e.test.ts`,
+  gated `KASSANDRA_E2E=1`, 2 arms, both green). A REAL futarchy TWAP verdict drove
+  a REAL Kassandra `set_config` through Squads — no fake, no deterministic
+  shortcut for the verdict.
+- **Arm 1 — bootstrap (real):** `bootstrapGovernance` → real `initialize_dao`
+  (creates the `Dao` + the Squads v4 multisig with `create_key==Dao` + vault
+  atomically; `program_config.treasury` fetched LIVE from the on-chain
+  ProgramConfig @ offset 48) → the G1-hardened `set_governance`. Asserts
+  on-chain `governanceSet==1`, `daoAuthority==vault`, `kassDao==dao` (G1's
+  hardened linkage check validated against the REAL Squads vault / futarchy DAO).
+- **Arm 2 — stage → proposal → launch → verdict → execute:**
+  1. `provide_liquidity` seeds the embedded spot AMM (price = 1e12 = PRICE_SCALE).
+  2. Stages a Kassandra `set_config` (sentinel `total_supply_cap`) **AND** a
+     `resolve_deadend` (on a fabricated `InvalidDeadend` oracle) as TWO inner CPIs
+     in ONE Squads `VaultTransaction` (compact `TransactionMessage` hand-encoded:
+     vault = ro-signer, protocol+oracle = w-non-signers, Kassandra prog = ro
+     program; `data` u16-prefixed) + `proposal_create(draft:false → Active)`,
+     signed by the public permissionless member (`EP3SoC2…`).
+  3. `initialize_question` (oracle == futarchy Proposal PDA) + base/quote
+     `initialize_conditional_vault` → `initialize_proposal` → `launch_proposal`.
+  4. **FULLY-REAL verdict:** trader splits USDC → conditional pass/fail quote
+     tokens, then 4× `conditional_swap` Buy-Pass (>60s apart via `surfnet_timeTravel`,
+     the oracle's 60s rate-limit) to raise the pass observation, then jumps past
+     `enqueue + 86400` and a final swap stamps the oracle beyond the
+     ProposalTooYoung / MarketsTooYoung windows. `finalize_proposal` resolves
+     **Passed** (`Proposal.state` tag == 2) → CPIs Squads `proposal_approve`.
+  5. `vault_transaction_execute` (member = permissionless) `invoke_signed`s BOTH
+     CPIs as the vault → **HEADLINE asserts `Protocol.total_supply_cap` == the
+     sentinel** (a real TWAP verdict drove a real config change via Squads), AND
+     the dead-ended oracle → `Phase::Resolved` + `resolved_option`.
+  6. **Live `kass_price`:** reads the futarchy spot TWAP from the REAL `Dao`
+     (not `buildDaoBlob`) via a simulated `kass_price` tx's return data → > 0.
+- **DEPLOYED == v0.6.1, not v0.6.0 (recon correction).** The on-chain program
+  (fetched via its Anchor IDL) is v0.6.1. Three SDK builders were corrected
+  (program + runner UNTOUCHED): `initialize_dao` args +`team_sponsored_pass_
+  threshold_bps:i16`+`team_address:Pubkey` (data 83→117 B); `initialize_proposal`
+  +`squads_multisig` (12 accts); `launch_proposal` +`squads_multisig`+`squads_
+  proposal` (20 accts). Added a `provide_liquidity` builder + `AmmPosition` PDA.
+  Parity test (`futarchy.test.ts`) pins updated; `sdk/src/futarchy/NOTES.md` has
+  the v0.6.1 addendum + the Squads `TransactionMessage` wire spec.
+- **Nothing deferred / no fake.** The full loop ran genuinely; the only T4-flagged
+  risk (live AMM-TWAP cranking) was satisfied by the 60s-spaced swaps + the
+  one-day `timeTravel` + final swap. Default `pnpm test` stays 88 offline
+  (surfpool suite excluded by `vitest.config.ts`); `cd sdk && pnpm typecheck`
+  clean; `just build` green; program/runner read-only.
+
 ## Execution note
 After each task: build/test green; the default `pnpm test` stays 72 offline; `cargo test -p kassandra-program` green. G1 is a focused, reviewed PROGRAM change (the only program edit). G2 is the make-or-break SDK builder work (stop-and-report if a MetaDAO wire format can't be authoritatively determined). G3 is the fully-real headline (genuine attempt; stop-and-report a real blocker rather than fake). Append a G1–G4 delta log here.

@@ -59,6 +59,48 @@ by the bootstrap.
 
 ---
 
+## G3 ADDENDUM — DEPLOYED program is futarchy **v0.6.1**, not v0.6.0 (verified live)
+
+The G2 layouts above were lifted from the `v0.6.0` SOURCE TAG. The program
+actually DEPLOYED on mainnet (and thus on the surfpool fork) is **v0.6.1**
+(confirmed by fetching the on-chain Anchor IDL at the program's IDL PDA). G3
+verified every builder against that live IDL and corrected three:
+
+- **`initialize_dao` args** — v0.6.1 `InitializeDaoParams` appends two trailing
+  fields after `initial_spending_limit`: `team_sponsored_pass_threshold_bps: i16`
+  then `team_address: Pubkey`. The None-spending-limit instruction data is
+  therefore **117 bytes** (83 + 2 + 32), not 83. The builder defaults them to
+  `0` / the zero (system) key. The DAO `invariant()` also now requires
+  `seconds_per_proposal >= 86400` (1 day) and `>= 2×twap_start_delay`,
+  `min_base/min_quote_futarchic_liquidity > 0`, `twap_max_observation_change > 0`,
+  `pass_threshold_bps <= 1000`, and `team_sponsored ∈ [MIN,MAX]`.
+- **`initialize_proposal` accounts** — v0.6.1 inserts `squads_multisig` as an
+  explicit account at index 2 (12 accounts incl. the event_cpi tail).
+- **`launch_proposal` accounts** — v0.6.1 inserts `squads_multisig` +
+  `squads_proposal` before `system_program` (20 accounts incl. the tail).
+
+`finalize_proposal` (25) + `conditional_swap` (25) + the conditional_vault +
+Squads builders MATCH v0.6.1 unchanged. New builders added for G3:
+`provide_liquidity` (disc `286e6b74ae7f61cc`; seeds the embedded spot AMM) +
+the `AmmPosition` PDA `[b"amm_position", dao, position_authority]`.
+
+**Squads `TransactionMessage` compact wire format** (used by G3 to stage the
+`set_config`/`resolve_deadend` CPIs): `num_signers:u8, num_writable_signers:u8,
+num_writable_non_signers:u8, account_keys:SmallVec<u8,Pubkey>,
+instructions:SmallVec<u8,CompiledIx>, address_table_lookups:SmallVec<u8,_>`;
+`CompiledIx = { program_id_index:u8, account_indexes:SmallVec<u8,u8>,
+data:SmallVec<u16,u8> }` — the instruction `data` length prefix is **u16**, all
+others u8. `account_keys` ordered [w-signers, ro-signers, w-non-signers,
+ro-non-signers]; the inner program id sits among the ro-non-signers. The vault
+PDA is a ro-SIGNER in the message (Squads `invoke_signed`s for it on execute);
+`vault_transaction_execute.remaining_accounts` = the static `account_keys` in
+order (no ALTs). Proposals are created with `draft:false` → `Active` (required by
+`initialize_proposal`); the futarchy `finalize_proposal` CPIs `proposal_approve`
+(threshold 1) on a PASS, after which `vault_transaction_execute` runs. The
+multisig's only `Initiate` member is the PUBLIC permissionless keypair
+(`EP3SoC2…`, futarchy `sdk/permissionless-account.json`) — it (not the Dao) must
+sign `vault_transaction_create` / `proposal_create`.
+
 ## conditional_vault (FULLY VALIDATED against the real binary)
 
 Validated by real-binary CPI in `tests/metadao_v06_cpi.rs::v06_conditional_vault_split`,

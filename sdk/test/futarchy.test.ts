@@ -208,7 +208,7 @@ describe("conditional_vault builders", () => {
 });
 
 describe("futarchy builders", () => {
-  it("initialize_dao: 83-byte data + the full 18-account order (event_cpi tail)", async () => {
+  it("initialize_dao: 117-byte data (v0.6.1 +team_* args) + the full 18-account order (event_cpi tail)", async () => {
     const args = {
       daoCreator: DAO_CREATOR,
       payer: PAYER,
@@ -239,8 +239,10 @@ describe("futarchy builders", () => {
       u32(86_400),
       u64(9n),
       Uint8Array.from([0]),
+      Uint8Array.from([0, 0]), // v0.6.1 team_sponsored_pass_threshold_bps: i16 = 0
+      new Uint8Array(32), // v0.6.1 team_address: Pubkey = zero/system key (default)
     );
-    expect(ix.data.length).toBe(83);
+    expect(ix.data.length).toBe(117);
     expect(hex(ix.data)).toBe(hex(expected));
 
     const dao = (await pda.dao(DAO_CREATOR, 9n)).address;
@@ -311,10 +313,10 @@ describe("futarchy builders", () => {
 
   it("initialize_proposal/finalize_proposal: disc-only data + event_cpi tail", async () => {
     const ip = await futarchy.initializeProposal({
-      squadsProposal: SOME, dao: SOME, question: SOME, quoteVault: SOME, baseVault: SOME, proposer: ADMIN, payer: PAYER,
+      squadsProposal: SOME, squadsMultisig: SOME, dao: SOME, question: SOME, quoteVault: SOME, baseVault: SOME, proposer: ADMIN, payer: PAYER,
     });
     expect(hex(ip.data)).toBe(hex(DISC.initializeProposal));
-    expect(ip.keys.length).toBe(11);
+    expect(ip.keys.length).toBe(12);
 
     const fp = await futarchy.finalizeProposal({
       proposal: SOME, dao: SOME, question: SOME, squadsProposal: SOME, squadsMultisig: SOME,
