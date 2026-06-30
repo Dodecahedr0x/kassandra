@@ -73,8 +73,35 @@ pub const PROVIDER_ID: &str = "anthropic";
 /// The `anthropic-version` header value.
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 
-/// The Messages endpoint.
+/// The default Messages endpoint (used when no base-URL override is set).
 pub const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
+
+/// Env var that, when set non-empty, overrides the Anthropic API base URL — e.g.
+/// to point the REAL provider at a local mock server in tests. Mirrors the
+/// official Anthropic SDK's `ANTHROPIC_BASE_URL`: the value is treated as the API
+/// **base** and the messages path (`/v1/messages`) is appended. When unset, the
+/// pinned [`MESSAGES_URL`] default is used unchanged.
+pub const BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
+
+/// Resolve the full `/v1/messages` endpoint URL from an optional base-URL
+/// override. When `base` is `Some(non-empty)`, the messages path is appended to
+/// it (any trailing `/` is trimmed first); otherwise the pinned default
+/// [`MESSAGES_URL`] is returned unchanged. Pure so it is unit-testable.
+pub fn resolve_messages_url(base: Option<&str>) -> String {
+    match base {
+        Some(b) if !b.trim().is_empty() => {
+            format!("{}/v1/messages", b.trim().trim_end_matches('/'))
+        }
+        _ => MESSAGES_URL.to_string(),
+    }
+}
+
+/// The base-URL override from [`BASE_URL_ENV`], if set to a non-empty value.
+fn base_url_from_env() -> Option<String> {
+    std::env::var(BASE_URL_ENV)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+}
 
 /// Per-request timeout. Adaptive thinking on hard prompts can take a while, so
 /// this is generous.
@@ -178,6 +205,8 @@ pub fn parse_messages_response(
 pub struct AnthropicProvider {
     client: reqwest::Client,
     api_key: String,
+    /// The resolved `/v1/messages` endpoint (the default unless overridden).
+    messages_url: String,
 }
 
 impl std::fmt::Debug for AnthropicProvider {
@@ -191,8 +220,28 @@ impl std::fmt::Debug for AnthropicProvider {
 
 impl AnthropicProvider {
     /// Build a provider from an explicit API key (with the default timeout). The
-    /// key is never logged.
+    /// key is never logged. The endpoint is the default [`MESSAGES_URL`] unless
+    /// [`BASE_URL_ENV`] is set, in which case that base is used (see
+    /// [`resolve_messages_url`]).
     pub fn new(api_key: impl Into<String>) -> anyhow::Result<Self> {
+        Self::build(
+            api_key,
+            resolve_messages_url(base_url_from_env().as_deref()),
+        )
+    }
+
+    /// Build a provider with an explicit base-URL override (the messages path is
+    /// appended via [`resolve_messages_url`]). Additive helper for tests that
+    /// point the REAL provider at a local mock server without touching env.
+    pub fn with_base_url(
+        api_key: impl Into<String>,
+        base_url: impl AsRef<str>,
+    ) -> anyhow::Result<Self> {
+        Self::build(api_key, resolve_messages_url(Some(base_url.as_ref())))
+    }
+
+    /// Shared constructor: validates the key and builds the HTTP client.
+    fn build(api_key: impl Into<String>, messages_url: String) -> anyhow::Result<Self> {
         let api_key = api_key.into();
         if api_key.trim().is_empty() {
             anyhow::bail!("ANTHROPIC_API_KEY is empty");
@@ -201,7 +250,16 @@ impl AnthropicProvider {
             .timeout(DEFAULT_REQUEST_TIMEOUT)
             .build()
             .map_err(|e| anyhow::anyhow!("failed to build HTTP client: {e}"))?;
-        Ok(Self { client, api_key })
+        Ok(Self {
+            client,
+            api_key,
+            messages_url,
+        })
+    }
+
+    /// The resolved `/v1/messages` endpoint this provider posts to.
+    pub fn messages_url(&self) -> &str {
+        &self.messages_url
     }
 
     /// Build a provider reading the API key from `ANTHROPIC_API_KEY`. Errors
@@ -225,7 +283,7 @@ impl AiProvider for AnthropicProvider {
 
         let resp = self
             .client
-            .post(MESSAGES_URL)
+            .post(&self.messages_url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
             .json(&body)
@@ -401,6 +459,51 @@ mod tests {
     fn new_rejects_empty_key() {
         assert!(AnthropicProvider::new("   ").is_err());
         assert!(AnthropicProvider::new("sk-test-key").is_ok());
+    }
+
+    // --- base-URL override (additive; default unchanged) -------------------
+
+    #[test]
+    fn resolve_messages_url_default_when_unset_or_empty() {
+        // Unset → the pinned default, unchanged.
+        assert_eq!(resolve_messages_url(None), MESSAGES_URL);
+        // Empty / whitespace-only → still the default (treated as not set).
+        assert_eq!(resolve_messages_url(Some("")), MESSAGES_URL);
+        assert_eq!(resolve_messages_url(Some("   ")), MESSAGES_URL);
+    }
+
+    #[test]
+    fn resolve_messages_url_appends_path_to_override() {
+        // The override is the API base; the messages path is appended.
+        assert_eq!(
+            resolve_messages_url(Some("http://127.0.0.1:8989")),
+            "http://127.0.0.1:8989/v1/messages"
+        );
+        // A trailing slash on the base is trimmed (no doubled `//`).
+        assert_eq!(
+            resolve_messages_url(Some("http://127.0.0.1:8989/")),
+            "http://127.0.0.1:8989/v1/messages"
+        );
+        // Surrounding whitespace is ignored.
+        assert_eq!(
+            resolve_messages_url(Some("  http://localhost:1234  ")),
+            "http://localhost:1234/v1/messages"
+        );
+    }
+
+    #[test]
+    fn provider_honors_base_url_override_and_keeps_default() {
+        // Default constructor (no env in this test) → the pinned default URL.
+        let default = AnthropicProvider::new("sk-test-key").unwrap();
+        assert_eq!(default.messages_url(), MESSAGES_URL);
+
+        // Explicit override → the mock endpoint, leaving the default untouched.
+        let overridden =
+            AnthropicProvider::with_base_url("sk-test-key", "http://127.0.0.1:8989").unwrap();
+        assert_eq!(
+            overridden.messages_url(),
+            "http://127.0.0.1:8989/v1/messages"
+        );
     }
 
     // --- live integration test: env-gated + #[ignore] ----------------------

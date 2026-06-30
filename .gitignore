@@ -1,2 +1,5 @@
 .worktrees/
 /target
+
+# surfpool runtime working dirs (logs/state) created by `surfpool start`
+.surfpool/

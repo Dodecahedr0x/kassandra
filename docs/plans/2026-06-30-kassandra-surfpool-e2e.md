@@ -49,5 +49,37 @@
 - Live devnet/mainnet submission with real funds; a real (non-mock) Anthropic call in E2E (the mock server is the point — deterministic + free; the runner's live Anthropic test already exists, `#[ignore]`).
 - Full futarchy-governance E2E (config/dead-end via the DAO) unless T4 reaches it; full challenge-market settlement if intractable on a forked validator (document).
 
+## Delta log
+
+### T1 — DONE (2026-06-30)
+- **Make-or-break PROVEN.** surfpool can be driven headless from a test, the
+  local `.so` deploys at the FIXED program id, and an SDK-built tx is accepted
+  over RPC + the Protocol decodes. No blockers.
+- **Runner base-URL override (additive, the only runner edit).**
+  `runner/src/anthropic.rs`: reads `ANTHROPIC_BASE_URL` (env); set non-empty →
+  treated as the API base, `/v1/messages` appended (mirrors the official SDK);
+  unset → the pinned `https://api.anthropic.com/v1/messages` default, UNCHANGED.
+  Added `AnthropicProvider::with_base_url(key, base)` + `messages_url()`
+  accessor + pure `resolve_messages_url()`. 3 new unit tests (default unchanged,
+  override appends path + trims slash/whitespace). Provider semantics / request
+  body / hashing untouched. `cargo test -p kassandra-runner` green (68 + 5 + 1,
+  1 `#[ignore]` live); clippy + fmt clean. No CLI flag added (env is the natural
+  channel for the T2 subprocess; kept minimal).
+- **Deploy method (the key recon).** `surfnet_setAccount` writes the ELF as a
+  non-upgradeable BPFLoader2 program account at `KassVxv...` (data is **hex**,
+  not base64); surfpool JIT-executes it. `solana program deploy` can't — the
+  build keypair is random, not the fixed vanity id. Cheatcodes catalogued for
+  T3 (`surfnet_timeTravel` for phase windows, `setTokenAccount`, `setSupply`,
+  `cloneProgramAccount` for T4, etc.). standalone simnet still hits a default
+  mainnet datasource at boot (network needed to boot) but the core path is
+  fully local. All in `NOTES-surfpool.md`.
+- **Harness + smoke (gated).** Reused the SDK package: `sdk/test/surfpool/`
+  (`harness.ts` `SurfpoolHarness` spawn→wait-health→deploy→teardown, +
+  `surfpool-smoke.test.ts`). Gated by `sdk/vitest.config.ts` (excludes
+  `test/surfpool/**` unless `KASSANDRA_E2E=1`) + a `pnpm test:e2e` script + a
+  `skipIf` for missing surfpool/`.so`. Default `pnpm test` = **72**, offline, no
+  surfpool spawn (verified). `pnpm test:e2e` = 73 incl. the real surfpool smoke;
+  teardown leaves port 8899 free.
+
 ## Execution note
 After each task: the relevant build/test green; the GATED suite must not break the default offline `pnpm test` (72) or the runner's `cargo test` (71). T1 (can we drive surfpool headless + deploy the .so + SDK-over-RPC) is the make-or-break — stop-and-report if not. The runner edit is additive (base-URL override) only. Prefer a standalone simnet for the core path (hermetic) and fork only for T4. Append a T1–T4 delta log here.
