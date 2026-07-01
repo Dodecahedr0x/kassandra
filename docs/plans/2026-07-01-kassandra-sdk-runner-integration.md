@@ -30,5 +30,68 @@
 - Meteora DAMM v2 spot-path builders (undeterminable zero-copy offsets — stays deferred).
 - A litesvm mirror of the settlement flow (surfpool E2E is the coverage; skip per decision).
 
+## Delta log
+
+### I3 — Runner on-chain RPC fetch + off-chain prompt source (done)
+- **New module `runner/src/rpc.rs`** — a minimal Solana JSON-RPC layer over the
+  existing `reqwest` (no `solana-client`/`solana-sdk`). A `JsonRpc` trait
+  (`call(method, params) -> result`) with the real `HttpJsonRpc` (POSTs the
+  `{jsonrpc,id,method,params}` envelope, surfaces JSON-RPC `error` objects) and a
+  no-network `MockRpc` (canned `method -> result`, mirrors `MockFactFetcher`) so
+  the whole decode path is OFFLINE-testable.
+- **`fetch_oracle`** — `getAccountInfo` (base64) → validate owner ==
+  `kassandra_program::ID` + `AccountType::Oracle` tag + length → decode via the
+  SHARED `kassandra_program::state::Oracle` Pod struct (`pod_read_unaligned`,
+  zero new decode code). `null` value → `AccountNotFound`.
+- **Fact enumeration via `getProgramAccounts`** (chosen over the documented
+  fallback — enumeration was tractable): a `Fact` PDA is `[b"fact", oracle,
+  content_hash]` so it can't be derived without the hashes; instead a filter of
+  `dataSize == Fact::LEN (336)` + `memcmp` on the `Fact.oracle` field (offset 8,
+  tied to `offset_of!(Fact, oracle)` with a compile-time assert; `memcmp bytes`
+  are base58 = the RPC default) pulls this oracle's `Fact` accounts, each decoded
+  via the shared `Fact` struct and kept iff `agreed`. `content_hash` + UTF-8
+  `uri[..uri_len]` returned, sorted by `content_hash`.
+- **Off-chain prompt-by-hash source** — `verify_prompt_hash(text, &prompt_hash)`
+  asserts `sha256(text) == oracle.prompt_hash` and REJECTS a mismatch
+  (`PromptHashMismatch`). Confirmed the derivation: the program stores
+  `prompt_hash` as an OPAQUE caller-supplied 32-byte value (never hashes anything
+  — `create_oracle.rs` copies `payload[8..40]` verbatim, exactly like
+  `content_hash`), so the derivation is the off-chain convention `prompt_hash =
+  sha256(interpretation_text_utf8)` (plain SHA-256, no framing) mirrored from
+  `fetch.rs`.
+- **CLI** — `CommonArgs` gains `--oracle/--rpc-url/--prompt-file`;
+  `build_config_from_chain(rpc, oracle_pubkey, prompt_text)` assembles the
+  `RunnerConfig` (options_count/facts from chain, interpretation from the
+  verified prompt file) and a `resolve_config` dispatches explicit-vs-on-chain
+  (mutually exclusive; `--oracle` requires the other two). Both `run`/`verify`
+  use it; the existing explicit-config path is unchanged. NO runner submission.
+- **Deps added:** `bytemuck` (Pod decode), `bs58` (owner/pubkey), `base64`
+  (account-data decode) — all small, pure-Rust.
+- **Tests (offline):** `rpc.rs` — oracle decode of shared Pod fields; rejects
+  wrong owner / wrong tag / not-found; fact enumeration decodes + filters agreed
+  (+ empty); prompt-hash match passes, mismatch rejected. `cli.rs` — end-to-end
+  `build_config_from_chain` via `MockRpc` (Oracle+Fact Pod bytes → config → runs
+  the pipeline through the mock provider) + prompt-mismatch rejection. `cargo
+  test -p kassandra-runner` 78 lib + 5 e2e + 1 smoke green; `cargo clippy -D
+  warnings` + `cargo fmt` clean. `runner/README.md` updated (on-chain mode +
+  prompt-hash requirement; replaced the "No on-chain RPC fetch" limitation).
+
 ## Execution note
 Independent tasks — can be reviewed/committed separately. I1 + I2 are gated surfpool E2E (spawn a fork/validator); I3 is runner + mock-RPC (offline). Keep the default `pnpm test` (102) + the runner `cargo test` offline + green. NOTE the surfpool slot-vs-timestamp finding: I1's sweep gate + the phase windows are timestamp-based (advanceToUnix works); I2's ALT needs slot-confirmation (a live cluster — surfpool). Append an I1/I2/I3 delta log here.
+
+## I1 delta log — DONE (2026-07-01): `sdk/test/surfpool/settlement-e2e.test.ts`
+Gated (`KASSANDRA_E2E=1`) surfpool E2E driving all 6 SETTLEMENT builders through the REAL program over RPC, in a standalone simnet (settlement touches no MetaDAO). Two arms, both green (`KASSANDRA_E2E=1 pnpm exec vitest run test/surfpool/settlement-e2e.test.ts` → 2 passed, ~21s):
+
+- **RESOLVED arm** — real dispute (create → propose×3 options 0/1/1 → finalize_proposals → submit_fact×2 [one AGREED, one REJECTED] → advance_phase → vote_fact×2 → finalize_facts → submit_ai_claim×3 claims 0/0/1 → finalize_ai_claims → finalize_oracle → Resolved(0)). Then every staker claims + closes over RPC:
+  - `claimFactVote`: agreed-approve → `stake + fact_reward`; rejected-approve → `stake − ceil(stake·num/den)`.
+  - `claimFact`: agreed → `stake + fact_reward`; rejected → `0` (forfeit). VotersOutstanding ordering respected (votes first, submitter last).
+  - `claimProposer` matrix: correct+no-flip → `bond + reward`; correct+flip → `bond − flip_slash + reward`; surviving-but-wrong → `bond` (no reward). All three rows asserted exercised.
+  - `closeAiClaim` ×3 (rent → authority; open→closed asserted).
+  - `closeMarket` — SEEDED settled Market + empty escrow via `surfnet_setAccount`, REAL `close_market` driven over RPC → Market + escrow closed, both rents → challenger.
+  - `sweepOracle` after the REAL 30-day grace (`advanceToUnix(phase_ends_at + SWEEP_GRACE + 1)`) → residual dust → treasury ATA, stake_vault + Oracle CLOSED.
+  - Conservation: `Σ payouts + residual dust == vault_initial` (dust < 8, floor/ceil rounding only).
+- **INVALID-DEADEND arm** — real dispute driven to a plurality tie (claims 0/1) → InvalidDeadend (`reward_pool == 0`). Claims return non-slashed principal (full bonds/stakes, no rewards), `closeAiClaim` each, conservation `Σ payouts + dust == vault_initial`, then `sweepOracle` after grace drains + closes the vault/oracle.
+
+**Real vs seeded:** every settlement builder + the dispute core is REAL over RPC; seeded (documented in the file header): the SPL mints/token accounts, the governance handoff's `kass_dao` account (fabricated futarchy-owned + Dao disc so the REAL `set_governance` validates — no futarchy program is deployed in a standalone simnet, and `set_governance` does no CPI, only owner/disc/PDA checks), the treasury ATA, and `close_market`'s settled-Market/escrow bytes. The disqualified-proposer claim row (→ 0) needs a real `settle_challenge` disqualify (forked AMMs) and stays covered by `challenge-market-e2e` (asserts `slashed_amount == bond − kass_fee`) + Rust `settlement_e2e`; the duplicate-dominant fact rows stay covered by Rust `settlement_e2e` tests 6-7.
+
+**No SDK↔program mismatch:** all 6 builders were accepted by the real program and their on-chain entitlement/close/sweep effects matched the reimplemented `reward.rs` math. Default `pnpm test` stays 102 offline.
