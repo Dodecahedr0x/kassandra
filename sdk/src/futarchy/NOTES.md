@@ -271,6 +271,71 @@ into Kassandra signed by the Squads vault PDA == `Protocol.dao_authority`.
 
 ---
 
+## F2a — `collect_meteora_damm_fees` — **PINNED (≥2 authoritative sources agree)**
+
+Previously UNDETERMINED (only NAMED as a string). Now authoritatively pinned for
+the DEPLOYED futarchy **v0.6.1** from TWO cross-confirming sources that AGREE
+EXACTLY on the 27-account order + roles + NO args:
+
+- **(a) source** — `metaDAOproject/programs@c1000ed84ef6d084203ad2a9c13940fd14feb53c`
+  (develop; futarchy `Cargo.toml` version = `0.6.1`, `declare_id! == FUTAREL…`):
+  `programs/futarchy/src/instructions/collect_meteora_damm_fees.rs` (the
+  `CollectMeteoraDammFees` `#[derive(Accounts)] #[event_cpi]` struct + nested
+  `MeteoraClaimPositionFeesAccounts`) + `lib.rs:158`
+  (`pub fn collect_meteora_damm_fees(ctx) -> Result<()>` — no params). There is
+  no `v0.6.1` git TAG; `develop` is the 0.6.1 line (the v0.6.0 tag has only the
+  embedded-AMM `collect_fees`, NOT this Meteora instruction).
+- **(b) on-chain Anchor IDL** of `FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq`
+  (legacy IDL account at `Cgg4TGESEzsewehRcFnbDaGmBznwkH23Ro1HqWz5VdtG` =
+  `createWithSeed(PDA([],prog), "anchor:idl", prog)`, inflated; `version 0.6.1`),
+  instruction `collectMeteoraDammFees` — same 27 accounts, same isMut/isSigner,
+  `args: []`.
+
+Disc `sha256("global:collect_meteora_damm_fees")[..8]` = **`8b d4 69 76 7e 36 d6 8f`**.
+NO positional args → instruction data = the 8-byte disc only.
+
+The handler builds a cp-amm `claim_position_fee` CPI, stages it in the DAO's
+Squads multisig (`vault_transaction_create` → `proposal_create` →
+`proposal_approve` → `vault_transaction_execute`, all internal CPIs), so the DAO's
+Squads vault signs the actual claim. Fees are swept to the MetaDAO protocol
+vault's ATAs (`metadao_multisig_vault::ID` = `6awyHMsh…`), NOT the DAO's own vault.
+
+Account order (then the `#[event_cpi]` tail), role w=writable / s=signer:
+```
+ 0 dao                              w        Account<Dao> (mut)
+ 1 admin                            w s      rent payer; == metadao_admin::ID (tSTp6B6k…) under `production`
+ 2 squads_multisig                  w        PDA [b"multisig", b"multisig", dao] @ squads
+ 3 squads_multisig_vault            w        PDA [b"multisig", multisig, b"vault", 0u8] @ squads
+ 4 squads_multisig_vault_transaction w       PDA [b"multisig", multisig, b"transaction", index:u64] @ squads
+ 5 squads_multisig_proposal         w        PDA [.. b"transaction", index, b"proposal"] @ squads
+ 6 squads_permissionless_account      s      == permissionless_account::id() (EP3SoC2…)
+ 7 damm_v2_program                            cp-amm program id (cpamd…)
+ 8 damm_v2_event_authority                    cp-amm PDA [b"__event_authority"]
+ 9 pool_authority                             == pool_authority::ID (HLnpSz9h…) = cp-amm PDA [b"pool_authority"]
+10 pool                                       cp-amm Pool
+11 position                         w         cp-amm Position
+12 token_a_account                  w         ATA(6awyHMsh…, base_mint)
+13 token_b_account                  w         ATA(6awyHMsh…, quote_mint)
+14 token_a_vault                    w         cp-amm base vault
+15 token_b_vault                    w         cp-amm quote vault
+16 token_a_mint                               == dao.base_mint
+17 token_b_mint                               == dao.quote_mint
+18 position_nft_account                       token account holding the position NFT
+19 owner                                      position owner (usually the DAO squads vault)
+20 token_a_program                            SPL Token (base)
+21 token_b_program                            SPL Token (quote)
+22 system_program
+23 token_program
+24 squads_program                             SQDS4ep6…
+25 event_authority                            futarchy PDA [b"__event_authority"]
+26 program                                    FUTARCHY_ID
+```
+Builder: `futarchy.collectMeteoraDammFees` (`instructions.ts`); offline byte/meta
+test in `test/futarchy.test.ts` (`describe("collect_meteora_damm_fees …")`).
+Confidence: HIGH — both sources agree exactly. NOT DRIVEN LIVE yet (F2b).
+
+---
+
 ## Meteora DAMM v2 — **DONE (SDK builders + decoders; offsets verified vs deployed)**
 
 The v0.6 conditional pass/fail VERDICT markets are the futarchy program's OWN

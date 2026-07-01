@@ -15,12 +15,18 @@ import { Address, TransactionInstruction } from "@solana/web3.js";
 import type { AccountMeta } from "@solana/web3.js";
 
 import { SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID } from "../constants.js";
+import * as mpda from "../meteora/pda.js";
 import type { AddressInput } from "../pda.js";
 import {
   CONDITIONAL_VAULT_ID,
+  DAMM_V2_POOL_AUTHORITY,
   DISC,
   FUTARCHY_ID,
   Market,
+  METADAO_ADMIN,
+  METADAO_MULTISIG_VAULT,
+  METEORA_DAMM_V2_ID,
+  SQUADS_PERMISSIONLESS_MEMBER,
   SQUADS_V4_ID,
   SwapType,
 } from "./constants.js";
@@ -639,6 +645,128 @@ export async function provideLiquidity(a: ProvideLiquidityArgs): Promise<Transac
       u128le(a.minLiquidity),
       addr(a.positionAuthority).toBytes(),
     ]),
+  });
+}
+
+export interface CollectMeteoraDammFeesArgs {
+  /** The futarchy `Dao` PDA (its Squads multisig + vault are derived from it). */
+  dao: AddressInput;
+  /**
+   * `admin` — writable signer + rent payer for the staged Squads txn/proposal.
+   * Under the `production` feature the program requires this == {@link METADAO_ADMIN}
+   * (the default).
+   */
+  admin?: AddressInput;
+  /**
+   * The NEW Squads transaction index (== `multisig.transaction_index + 1` at
+   * call time). Seeds the `squads_multisig_vault_transaction` + `squads_multisig_proposal`.
+   */
+  transactionIndex: bigint | number;
+  // ── Meteora cp-amm (claim_position_fee) accounts ──
+  /** The Meteora cp-amm `Pool` the DAO holds a position in. */
+  pool: AddressInput;
+  /** The DAO's Meteora `Position`. */
+  position: AddressInput;
+  /** cp-amm token-A vault (base). */
+  tokenAVault: AddressInput;
+  /** cp-amm token-B vault (quote). */
+  tokenBVault: AddressInput;
+  /** Base mint (must equal `dao.base_mint`). */
+  tokenAMint: AddressInput;
+  /** Quote mint (must equal `dao.quote_mint`). */
+  tokenBMint: AddressInput;
+  /** Token account holding the position NFT. */
+  positionNftAccount: AddressInput;
+  /** Position owner (per the handler, usually the DAO's Squads vault). */
+  owner: AddressInput;
+  /**
+   * Base fee-recipient token account. Defaults to
+   * `ata({@link METADAO_MULTISIG_VAULT}, tokenAMint)` (the on-chain
+   * `associated_token::authority` constraint).
+   */
+  tokenAAccount?: AddressInput;
+  /** Quote fee-recipient token account. Defaults to `ata(METADAO_MULTISIG_VAULT, tokenBMint)`. */
+  tokenBAccount?: AddressInput;
+  /** Token program owning base mint (SPL Token by default). */
+  tokenAProgram?: AddressInput;
+  /** Token program owning quote mint (SPL Token by default). */
+  tokenBProgram?: AddressInput;
+  /** The permissionless Squads member (signer). Defaults to {@link SQUADS_PERMISSIONLESS_MEMBER}. */
+  permissionlessAccount?: AddressInput;
+}
+
+/**
+ * `collect_meteora_damm_fees` — the futarchy program sweeps the DAO's Meteora
+ * cp-amm position fees to the MetaDAO protocol vault. It builds a cp-amm
+ * `claim_position_fee` CPI, stages it in the DAO's Squads multisig
+ * (`vault_transaction_create` → `proposal_create` → `proposal_approve` →
+ * `vault_transaction_execute`, all CPI'd internally), so the DAO's Squads vault
+ * signs the actual claim. NO positional args (disc only).
+ *
+ * Wire format PINNED from TWO authoritative sources that AGREE exactly (27
+ * accounts incl. the `#[event_cpi]` tail, no args):
+ *   (a) metaDAOproject/programs@c1000ed84ef6d084203ad2a9c13940fd14feb53c
+ *       `programs/futarchy/src/instructions/collect_meteora_damm_fees.rs`
+ *       (declare_id == FUTAREL…, Cargo.toml version 0.6.1) + `lib.rs:158`.
+ *   (b) the on-chain Anchor IDL of `FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq`
+ *       (v0.6.1) — instruction `collectMeteoraDammFees`.
+ * disc = sha256("global:collect_meteora_damm_fees")[..8] = 8bd469767e36d68f.
+ */
+export async function collectMeteoraDammFees(
+  a: CollectMeteoraDammFeesArgs,
+): Promise<TransactionInstruction> {
+  const admin = a.admin ?? METADAO_ADMIN;
+  const permissionless = a.permissionlessAccount ?? SQUADS_PERMISSIONLESS_MEMBER;
+  const tokenAProgram = a.tokenAProgram ?? TOKEN_PROGRAM_ID;
+  const tokenBProgram = a.tokenBProgram ?? TOKEN_PROGRAM_ID;
+
+  const multisig = (await fpda.squadsMultisig(a.dao)).address;
+  const squadsVault = (await fpda.squadsVault(multisig, 0)).address;
+  const squadsTransaction = (await fpda.squadsTransaction(multisig, a.transactionIndex)).address;
+  const squadsProposal = (await fpda.squadsProposal(multisig, a.transactionIndex)).address;
+  const eventAuthority = (await fpda.futarchyEventAuthority()).address;
+
+  const dammEventAuthority = (await mpda.eventAuthority()).address;
+  // pool_authority::ID is hard-coded in the handler; == the cp-amm [b"pool_authority"] PDA.
+  const poolAuthority = DAMM_V2_POOL_AUTHORITY;
+
+  const tokenAAccount = a.tokenAAccount ?? (await ata(METADAO_MULTISIG_VAULT, a.tokenAMint));
+  const tokenBAccount = a.tokenBAccount ?? (await ata(METADAO_MULTISIG_VAULT, a.tokenBMint));
+
+  return new TransactionInstruction({
+    programId: addr(FUTARCHY_ID),
+    keys: [
+      w(a.dao),
+      w(admin, true),
+      w(multisig),
+      w(squadsVault),
+      w(squadsTransaction),
+      w(squadsProposal),
+      ro(permissionless, true),
+      // meteora_claim_position_fees_accounts (flattened, IDL order)
+      ro(METEORA_DAMM_V2_ID),
+      ro(dammEventAuthority),
+      ro(poolAuthority),
+      ro(a.pool),
+      w(a.position),
+      w(tokenAAccount),
+      w(tokenBAccount),
+      w(a.tokenAVault),
+      w(a.tokenBVault),
+      ro(a.tokenAMint),
+      ro(a.tokenBMint),
+      ro(a.positionNftAccount),
+      ro(a.owner),
+      ro(tokenAProgram),
+      ro(tokenBProgram),
+      // trailing programs + event_cpi tail
+      ro(SYSTEM_PROGRAM_ID),
+      ro(TOKEN_PROGRAM_ID),
+      ro(SQUADS_V4_ID),
+      ro(eventAuthority),
+      ro(FUTARCHY_ID),
+    ],
+    data: DISC.collectMeteoraDammFees,
   });
 }
 

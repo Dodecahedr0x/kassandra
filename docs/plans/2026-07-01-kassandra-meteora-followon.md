@@ -48,6 +48,40 @@ SDK/test only; default `pnpm test` stays offline + green; the E2Es are gated. F1
 
 ## Delta log
 
+### F2a — PINNED (not STOP-reported) — 2026-07-01
+The futarchy `collect_meteora_damm_fees` wire format is authoritatively pinned for
+the DEPLOYED **v0.6.1** from TWO cross-confirming sources that agree EXACTLY:
+- **(a)** `metaDAOproject/programs@c1000ed84ef6d084203ad2a9c13940fd14feb53c`
+  (`develop`; futarchy `Cargo.toml` = 0.6.1, `declare_id! == FUTAREL…`):
+  `programs/futarchy/src/instructions/collect_meteora_damm_fees.rs` + `lib.rs:158`.
+  NB: there is no `v0.6.1` git tag; the `v0.6.0` tag has only the embedded-AMM
+  `collect_fees`, NOT the Meteora instruction. `develop` is the 0.6.1 line.
+- **(b)** the on-chain Anchor IDL of `FUTAREL…` (legacy IDL account
+  `Cgg4TGESEzsewehRcFnbDaGmBznwkH23Ro1HqWz5VdtG`, inflated; `version 0.6.1`) —
+  instruction `collectMeteoraDammFees`, same 27 accounts + isMut/isSigner, `args: []`.
+
+- **disc** `sha256("global:collect_meteora_damm_fees")[..8]` = `8b d4 69 76 7e 36 d6 8f`.
+- **args**: NONE (instruction data = the 8-byte disc only).
+- **accounts** (27 incl. the `#[event_cpi]` tail): `dao(w)`, `admin(w,signer)`,
+  `squads_multisig(w,PDA)`, `squads_multisig_vault(w,PDA)`,
+  `squads_multisig_vault_transaction(w,PDA)`, `squads_multisig_proposal(w,PDA)`,
+  `squads_permissionless_account(signer, EP3SoC2…)`, then the flattened
+  `MeteoraClaimPositionFeesAccounts`: `damm_v2_program`, `damm_v2_event_authority`,
+  `pool_authority(HLnpSz9h…)`, `pool`, `position(w)`, `token_a_account(w)`,
+  `token_b_account(w)`, `token_a_vault(w)`, `token_b_vault(w)`, `token_a_mint`,
+  `token_b_mint`, `position_nft_account`, `owner`, `token_a_program`,
+  `token_b_program`, then `system_program`, `token_program`, `squads_program`,
+  `event_authority(futarchy PDA)`, `program(FUTARCHY_ID)`. The fee-recipient
+  `token_{a,b}_account` ATAs are owned by the MetaDAO protocol vault
+  (`6awyHMsh…`), not the DAO's own vault.
+- **shipped**: `futarchy.collectMeteoraDammFees` builder + `DISC.collectMeteoraDammFees`
+  + fixed-address constants (`METADAO_MULTISIG_VAULT`, `METADAO_ADMIN`,
+  `DAMM_V2_POOL_AUTHORITY`) + offline byte/meta test in `test/futarchy.test.ts`.
+  Confidence HIGH (both sources agree exactly). Covered = builder byte-verified;
+  DEFERRED = live drive (F2b).
+
+## Delta log
+
 ### F1 — removeLiquidity + claimPositionFee driven LIVE (DONE)
 Extended `sdk/test/surfpool/meteora-spot-e2e.test.ts`: after the existing
 init→add→swap→createPosition arm, added `claimPositionFee` + `removeLiquidity`

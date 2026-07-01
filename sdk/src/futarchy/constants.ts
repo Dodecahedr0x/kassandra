@@ -28,6 +28,38 @@ export const SQUADS_PERMISSIONLESS_MEMBER = new Address(
   "EP3SoC2SvR3d4c2eXVBvhEMWSr2j3YtoCY3UMiQV7BPD",
 );
 
+// ── collect_meteora_damm_fees fixed addresses (v0.6.1) ────────────────────────
+// Sourced from the DEPLOYED v0.6.1 handler
+// (metaDAOproject/programs@c1000ed `programs/futarchy/src/instructions/collect_meteora_damm_fees.rs`).
+
+/**
+ * MetaDAO protocol multisig vault — the AUTHORITY of the `token_a_account` /
+ * `token_b_account` fee-recipient ATAs in `collect_meteora_damm_fees`
+ * (`metadao_multisig_vault::ID`, enforced by `associated_token::authority`). The
+ * DAO's Meteora LP fees are swept HERE, not to the DAO's own vault.
+ */
+export const METADAO_MULTISIG_VAULT = new Address(
+  "6awyHMshBGVjJ3ozdSJdyyDE1CTAXUwrpNMaRGMsb4sf",
+);
+
+/**
+ * The `admin` signer `collect_meteora_damm_fees` requires under the `production`
+ * feature (`metadao_admin::ID`; a non-Squads signer, chosen to stay under the
+ * CPI depth limit). Default `admin` for the builder.
+ */
+export const METADAO_ADMIN = new Address(
+  "tSTp6B6kE9o6ZaTmHm2ZwnJBBtgd3x112tapxFhmBEQ",
+);
+
+/**
+ * Meteora DAMM v2 pool-authority PDA (`[b"pool_authority"]` under the cp-amm
+ * program) — hard-coded as `pool_authority::ID` in the collect handler. Equal to
+ * the derived cp-amm PDA (verified).
+ */
+export const DAMM_V2_POOL_AUTHORITY = new Address(
+  "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC",
+);
+
 const d = (bytes: number[]): Uint8Array => Uint8Array.from(bytes);
 
 /** Anchor instruction discriminators — `sha256("global:<name>")[..8]`. */
@@ -42,6 +74,10 @@ export const DISC = {
   conditionalSwap: d([0xc2, 0x88, 0xdc, 0x59, 0xf2, 0xa9, 0x82, 0x9d]),
   // provide_liquidity (sha256("global:provide_liquidity")[..8]) — v0.6.1 deployed.
   provideLiquidity: d([0x28, 0x6e, 0x6b, 0x74, 0xae, 0x7f, 0x61, 0xcc]),
+  // collect_meteora_damm_fees (sha256("global:collect_meteora_damm_fees")[..8]) —
+  // v0.6.1 deployed; PINNED from metaDAOproject/programs@c1000ed source + the
+  // on-chain Anchor IDL (both agree; NO args). See NOTES.md ("F2a").
+  collectMeteoraDammFees: d([0x8b, 0xd4, 0x69, 0x76, 0x7e, 0x36, 0xd6, 0x8f]),
   // conditional_vault
   initializeQuestion: d([0xf5, 0x97, 0x6a, 0xbc, 0x58, 0x2c, 0x41, 0xd4]),
   resolveQuestion: d([0x34, 0x20, 0xe0, 0xb3, 0xb4, 0x08, 0x00, 0xf6]),
