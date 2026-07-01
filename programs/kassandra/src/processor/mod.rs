@@ -32,6 +32,7 @@ pub mod set_governance;
 pub mod settle_challenge;
 pub mod submit_ai_claim;
 pub mod submit_fact;
+pub mod sweep_oracle;
 pub mod vote_fact;
 
 pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
@@ -64,5 +65,6 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
         Ix::ClaimFactVote => claims::claim_fact_vote(program_id, accounts, payload),
         Ix::CloseAiClaim => close_ai_claim::process(program_id, accounts, payload),
         Ix::CloseMarket => close_market::process(program_id, accounts, payload),
+        Ix::SweepOracle => sweep_oracle::process(program_id, accounts, payload),
     }
 }

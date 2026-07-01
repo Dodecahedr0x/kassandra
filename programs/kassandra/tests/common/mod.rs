@@ -71,6 +71,11 @@ pub const TWAP_WINDOW: i64 = 600;
 /// this far to reach the deadline so the proposal window is open.
 pub const DEADLINE_DELTA: i64 = 1_000;
 
+/// SPL Associated Token Account program id — the DAO treasury (SW1 sweep target)
+/// is the canonical KASS ATA of `dao_authority`, derived under this program.
+pub const ATA_PROGRAM_ID: Pubkey =
+    solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
 /// KASS mint decimals.
 pub const KASS_DECIMALS: u8 = 9;
 /// USDC mint decimals.
@@ -2231,6 +2236,108 @@ impl TestCtx {
                 AccountMeta::new(market, false),
                 AccountMeta::new(challenger_usdc_vault, false),
                 AccountMeta::new(rent_recipient, false),
+                AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            ],
+            data,
+        }
+    }
+
+    // ----- SW1: sweep_oracle (dust → treasury + terminal closure) helpers -----
+
+    /// Overwrite a seeded oracle's `creator` (the rent recipient the sweep /
+    /// closes refund to). Lets sweep tests point rent at a fresh keypair distinct
+    /// from the fee payer, so an exact lamport-delta assertion is not confounded
+    /// by transaction fees.
+    pub fn set_creator(&mut self, oracle: Pubkey, creator: Pubkey) {
+        let mut o = self.oracle(oracle);
+        o.creator = creator.to_bytes();
+        self.set_program_account(oracle, bytemuck::bytes_of(&o).to_vec());
+    }
+
+    /// Add `amount` KASS to a seeded oracle's `stake_vault` (backed by mint
+    /// supply, mirroring the harness philosophy), modelling the residual dust /
+    /// unclaimed principal a terminal vault retains after (or without) claims.
+    pub fn fund_vault(&mut self, oracle: Pubkey, amount: u64) {
+        let vault = Pubkey::new_from_array(self.oracle(oracle).stake_vault);
+        self.add_token_balance(vault, amount);
+        self.add_mint_supply(self.kass_mint, amount);
+    }
+
+    /// Derive the canonical KASS associated-token-account of `owner`
+    /// (`ATA(owner, kass_mint)` under the ATA program) — the address the DAO
+    /// treasury lives at.
+    pub fn kass_ata(&self, owner: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[
+                owner.as_ref(),
+                TOKEN_PROGRAM_ID.as_ref(),
+                self.kass_mint.as_ref(),
+            ],
+            &ATA_PROGRAM_ID,
+        )
+        .0
+    }
+
+    /// Fabricate the DAO treasury: an empty KASS token account AT the canonical
+    /// `ATA(owner, kass_mint)` address, owned (token authority) by `owner`.
+    /// Returns the ATA address.
+    pub fn seed_kass_treasury(&mut self, owner: Pubkey) -> Pubkey {
+        let ata = self.kass_ata(owner);
+        let state = TokenAccount {
+            mint: self.kass_mint,
+            owner,
+            amount: 0,
+            delegate: COption::None,
+            state: AccountState::Initialized,
+            is_native: COption::None,
+            delegated_amount: 0,
+            close_authority: COption::None,
+        };
+        let mut data = vec![0u8; TokenAccount::LEN];
+        state.pack_into_slice(&mut data);
+        let lamports = self
+            .svm
+            .minimum_balance_for_rent_exemption(TokenAccount::LEN);
+        self.svm
+            .set_account(
+                ata,
+                Account {
+                    lamports,
+                    data,
+                    owner: TOKEN_PROGRAM_ID,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .unwrap();
+        ata
+    }
+
+    /// Build a `SweepOracle` instruction (Ix 22). Account order:
+    /// `[0] oracle(w) [1] stake_vault(w) [2] protocol(ro) [3] dao_treasury(w)
+    /// [4] creator(w) [5] token program`. Payload = `oracle_nonce` LE. Exposes
+    /// every account so tests can pass a wrong treasury / creator / vault.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sweep_oracle_ix(
+        &self,
+        oracle: Pubkey,
+        nonce: u64,
+        stake_vault: Pubkey,
+        protocol: Pubkey,
+        dao_treasury: Pubkey,
+        creator: Pubkey,
+    ) -> Instruction {
+        let mut data = Vec::with_capacity(1 + 8);
+        data.push(kassandra_program::instruction::Ix::SweepOracle as u8);
+        data.extend_from_slice(&nonce.to_le_bytes());
+        Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                AccountMeta::new(oracle, false),
+                AccountMeta::new(stake_vault, false),
+                AccountMeta::new_readonly(protocol, false),
+                AccountMeta::new(dao_treasury, false),
+                AccountMeta::new(creator, false),
                 AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
             ],
             data,

@@ -101,6 +101,15 @@ pub enum Ix {
     /// signed) and the `Market` PDA, both reclaiming rent to `market.challenger`.
     /// Idempotent by closure.
     CloseMarket = 21,
+    /// Permissionless grace-gated dust sweep + terminal-account closure for ONE
+    /// oracle (Task SW1): once the oracle is terminal AND `now >=
+    /// oracle.phase_ends_at + config::SWEEP_GRACE`, transfers the ENTIRE residual
+    /// `stake_vault` KASS (bounded rounding dust — or a no-show staker's
+    /// forfeited principal) to the DAO treasury (the KASS ATA of
+    /// `Protocol.dao_authority`, oracle-PDA signed), then CLOSES the `stake_vault`
+    /// (SPL `CloseAccount`) and the `Oracle` PDA, reclaiming both rents to
+    /// `oracle.creator`. Requires governance to be set. Idempotent by closure.
+    SweepOracle = 22,
     // Future variants are APPENDED here with the next discriminant; add a
     // matching arm to `from_u8` below.
 }
@@ -132,6 +141,7 @@ impl Ix {
             19 => Some(Ix::ClaimFactVote),
             20 => Some(Ix::CloseAiClaim),
             21 => Some(Ix::CloseMarket),
+            22 => Some(Ix::SweepOracle),
             _ => None,
         }
     }

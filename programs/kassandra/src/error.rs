@@ -146,6 +146,22 @@ pub enum KassandraError {
     /// so the gate on `set_config`/`resolve_deadend` can only be satisfied by the
     /// DAO's real Squads execution authority.
     DaoAuthorityMismatch = 32,
+    /// `sweep_oracle` (Ix 22) was called before the dust-sweep grace elapsed
+    /// (`now < oracle.phase_ends_at + config::SWEEP_GRACE`). The reap of a
+    /// terminal oracle's residual vault + its account closure is deliberately
+    /// delayed a generous window so honest claimants have ample time to claim.
+    SweepGraceNotElapsed = 33,
+    /// `sweep_oracle` (Ix 22) was called while the `Protocol` has no DAO linkage
+    /// (`governance_set == 0`). The sweep routes the residual KASS to the DAO
+    /// treasury (the KASS ATA of `dao_authority`), which does not exist until
+    /// `set_governance` records it — so an oracle cannot be swept until the DAO
+    /// is set.
+    GovernanceNotSet = 34,
+    /// `sweep_oracle` (Ix 22) was given a `dao_treasury` account that is NOT the
+    /// canonical KASS associated-token-account of `Protocol.dao_authority`
+    /// (`ATA(dao_authority, kass_mint)`). The residual dust may only be routed to
+    /// the DAO's own treasury ATA, never an arbitrary account.
+    InvalidTreasury = 35,
 }
 
 impl From<KassandraError> for ProgramError {

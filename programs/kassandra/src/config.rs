@@ -13,6 +13,25 @@ pub const PHASE_WINDOW: i64 = 3600;
 /// at the `deadline` and the window runs for this long afterward.
 pub const PROPOSAL_WINDOW: i64 = 3600;
 
+/// Grace period (seconds) after a TERMINAL oracle's `phase_ends_at` before the
+/// permissionless `sweep_oracle` (Ix 22) may reap it — route the residual
+/// `stake_vault` KASS to the DAO treasury and CLOSE the vault + `Oracle`.
+///
+/// Deliberately GENEROUS — 30 days, dwarfing the hour-scale phase/proposal
+/// windows ([`PHASE_WINDOW`] / [`PROPOSAL_WINDOW`]) — so every honest claimant
+/// has ample time to crank their per-staker claim after resolution. The sweep is
+/// gated on `now >= oracle.phase_ends_at + SWEEP_GRACE` (AND the oracle being
+/// terminal). `phase_ends_at` is the terminal-entry anchor: `finalize_oracle`
+/// can only drive the oracle terminal at `now >= phase_ends_at` (the challenge
+/// window's end) and does NOT advance it, so it is a lower bound on the true
+/// terminal time — the effective grace is therefore never SHORTER than this.
+///
+/// TRADE-OFF (starkly documented): a staker who never claims within the grace
+/// FORFEITS their unclaimed KASS principal (swept to the treasury) AND their
+/// per-account rent. The long window makes this a genuine abandonment, not a
+/// race — see `processor/sweep_oracle.rs`.
+pub const SWEEP_GRACE: i64 = 30 * 24 * 60 * 60;
+
 /// Upper bound on an oracle's proposer set, set to a realistic single-transaction
 /// account-lock budget (Solana caps a tx at 64 account locks; `finalize_oracle`
 /// also locks the oracle + program + fee payer, leaving ~60 read-only proposer
