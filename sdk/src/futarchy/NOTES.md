@@ -273,6 +273,17 @@ into Kassandra signed by the Squads vault PDA == `Protocol.dao_authority`.
 
 ## F2a — `collect_meteora_damm_fees` — **PINNED (≥2 authoritative sources agree)**
 
+> **Scope — this is MetaDAO's protocol-rake op, NOT a Kassandra dependency.**
+> `collect_meteora_damm_fees` sweeps a DAO's Meteora LP fees into **MetaDAO's OWN
+> vault** (`token_{a,b}_account` are `associated_token::authority =
+> metadao_multisig_vault::ID` = `6awyHMsh…`), gated on **MetaDAO's keeper**
+> (`require_keys_eq!(admin, metadao_admin::ID = tSTp6B6k…)` under `production`).
+> **Kassandra does NOT call it and does NOT depend on it.** The builder is KEPT +
+> wire-verified at THREE levels (F2a offline bytes + F2b reach-the-admin-gate live
+> proof + D2 litesvm full-drive) as a faithful pin of the deployed instruction, but
+> the DAO collects its OWN Meteora treasury fees via the **admin-free, DAO-owned,
+> governance-authorized path (D1)** — see "### D1" below.
+
 Previously UNDETERMINED (only NAMED as a string). Now authoritatively pinned for
 the DEPLOYED futarchy **v0.6.1** from TWO cross-confirming sources that AGREE
 EXACTLY on the 27-account order + roles + NO args:
@@ -363,6 +374,45 @@ and the handler then stages the cp-amm `claim_position_fee` through the DAO's
 Squads permissionless-member chain — so a real sweep needs a MetaDAO-admin
 context. The builder is wire-verified (F2a byte test) + layout-verified live (this
 F2b reach-the-admin-gate proof); the live sweep is deferred.
+
+### D2 — litesvm FULL-DRIVE to COMPLETION (the sweep F2b had to defer)
+
+The DEFERRED full sweep is now **driven to COMPLETION** — past the admin gate,
+through the entire handler — by the gated litesvm test
+`sdk/test/meteora-collect-litesvm.test.ts`. litesvm can do the one thing surfpool
+cannot: `svm.withSigverify(false)`, which lets the REAL production admin
+(`tSTp6B6k…`) be presented as a required-but-UNSIGNED signer (its slot filled with
+a zero signature), so the handler runs past `require_keys_eq!(admin,
+metadao_admin::ID)` without forging a MetaDAO signature.
+
+litesvm hosts all **three real deployed programs** — futarchy (`FUTAREL…`, 1.24
+MB), cp-amm (`cpamd…`, 2.17 MB) and Squads v4 (`SQDS4ep6…`, 1.47 MB) — from
+committed `.so` fixtures (`test/fixtures/programs/`, dumped via `solana program
+dump`), plus the real Squads `ProgramConfig` + a public cp-amm `Config` as account
+fixtures; SPL Token / Token-2022 / ATA come from litesvm builtins. The test builds
+GENUINE state with the real instructions: `initialize_dao` (→ Dao + Squads
+multisig/vault via the futarchy→Squads `multisig_create_v2` CPI), cp-amm
+`initialize_pool` (the first position OWNED BY the DAO's Squads vault — `creator`
+is an UncheckedAccount, so `creator == vault`), and `swap`s that accrue a real LP
+fee (token-B side on this Config, per the M2 finding). Then it drives
+`collectMeteoraDammFees`: the internal `vault_transaction_create →
+proposal_create → proposal_approve → vault_transaction_execute` chain and the
+inner cp-amm `claim_position_fee` all execute (visible in the CPI logs), and the
+accrued fee is **swept to the MetaDAO vault's ATAs** (`ATA(6awyHMsh…, {base,quote}
+mint)`) — the test decodes those ATAs before/after and asserts the balance ROSE by
+a nonzero fee, and that the Position's `fee_b_pending` cleared. Notes: the tx needs
+`setComputeUnitLimit(1_400_000)` (the 4-deep CPI chain exceeds the 200k default), a
+mainnet-like Clock (cp-amm's fee scheduler reads it), and the admin funded as the
+Squads rent-payer.
+
+So the F2a 27-account wire format is now proven at THREE levels: offline bytes
+(F2a), reach-the-admin-gate on the deployed binary (F2b, surfpool), and END-TO-END
+completion (D2, litesvm). **The `withSigverify(false)` bypass is a TEST-ONLY
+device** — the production program still requires the real MetaDAO keeper's
+signature. This is a completeness proof of **MetaDAO's protocol-rake op**, which
+**Kassandra does NOT call**: the DAO collects its OWN Meteora treasury fees
+admin-free via its Squads vault (the D1 path,
+`sdk/test/surfpool/dao-meteora-treasury-e2e.test.ts`).
 
 ---
 

@@ -54,3 +54,40 @@ It sweeps a DAO's Meteora LP fees into MetaDAO's OWN vault. **Kassandra must NOT
 
 ## Execution note
 SDK/test/docs only; default `pnpm test` stays green (offline; D2 litesvm is offline IF program .so fixtures are committed, else gate it). D1 + D2 are INDEPENDENT (D1 = surfpool test; D2 = litesvm test) → can run in parallel. D3 folds into their doc updates. Both D1 + D2 have a real risk (D1: Squads-owns-a-cp-amm-position; D2: 3-program litesvm host) — STOP-report a genuine blocker, never fake. Append a D1/D2/D3 delta log here.
+
+---
+
+## Delta log
+
+### D2 — DONE (litesvm full-drive to COMPLETION; the F2b-deferred sweep is now proven)
+
+litesvm CAN host the 3-program multi-CPI env. `sdk/test/meteora-collect-litesvm.test.ts`
+(gated `KASSANDRA_LITESVM_PROGRAMS=1`) loads futarchy (`FUTAREL…`, 1.24 MB),
+cp-amm (`cpamd…`, 2.17 MB) and Squads v4 (`SQDS4ep6…`, 1.47 MB) from committed
+`.so` fixtures (`sdk/test/fixtures/programs/`, dumped via `solana program dump`)
++ real Squads `ProgramConfig` + a public cp-amm `Config` as account fixtures
+(SPL Token / Token-2022 / ATA from litesvm builtins). It builds genuine state with
+the real ixs — `initialize_dao` (→ Dao + Squads multisig/vault via the
+futarchy→Squads `multisig_create_v2` CPI), cp-amm `initialize_pool` (first position
+OWNED BY the DAO's Squads vault, since `creator` is an UncheckedAccount so
+`creator == vault`), swaps that accrue a real LP fee — then `svm.withSigverify(false)`
++ the F2a `collectMeteoraDammFees` with the REAL admin `tSTp6B6k…` as a
+required-but-UNSIGNED signer (zero-signature slot). The handler drives PAST the
+admin gate through the full internal `vault_transaction_create → proposal_create →
+proposal_approve → vault_transaction_execute → cp-amm claim_position_fee` chain
+(all visible in CPI logs), and the accrued fee is **swept to the MetaDAO vault ATAs**
+(`ATA(6awyHMsh…, {base,quote} mint)`): asserted the recipient ATA rose by a nonzero
+fee (measured token-B = 951804 raw) and the Position's `fee_b_pending` cleared.
+
+Gotchas resolved: `setComputeUnitLimit(1_400_000)` (the 4-deep CPI chain exceeds
+the 200k default), a mainnet-like Clock via `setClock` (cp-amm's fee scheduler /
+activation reads it — litesvm's near-zero default overflows the swap math), the
+`admin` funded as the Squads rent-payer, and the PUBLIC permissionless member
+(`EP3SoC2…`) signed with its published secret (only `admin` is left unsigned).
+
+DEFAULT vs GATED: fixtures committed (offline-reproducible) but the test is GATED
+(`.so`s total ~4.9 MB → skip loading them on every default run); default `pnpm test`
+stays green with the D2 test SKIPPED (127 passed | 1 skipped). The
+`withSigverify(false)` bypass is TEST-ONLY (production still needs the real MetaDAO
+keeper); this proves MetaDAO's protocol-rake op, which Kassandra does NOT depend on
+(the DAO uses the admin-free D1 path). NOTES.md updated with a distinct D2 subsection.
