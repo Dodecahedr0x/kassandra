@@ -16,6 +16,21 @@ solana program dump -u m SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf squads_v4.s
 
 (SPL Token, Token-2022 and the ATA program come from litesvm's default builtins.)
 
+### Pinned checksums (`sha256`)
+
+The exact bytes committed here, so a future re-dump of an *upgraded* on-chain
+program can't silently change the D2 proof. Verify with
+`shasum -a 256 -c` against this list (or `shasum -a 256 *.so`):
+
+```
+753daac67ed0393dc6b3678420ead88814205780eae13cacb5dbafdb179bf8d6  futarchy.so
+16eeb0c2f116a0b43849f8de2422c915fea2e35d47fbe3bf705cb95570f1ebfb  cp_amm.so
+dec8d3e0fae58c7c8f2416e5f67c25e673f047afd6dd2bba4a47e0b29a01d34c  squads_v4.so
+```
+
+A mismatch means the deployed program was upgraded since these were dumped —
+re-verify the D2 wire format against the new binary before updating them.
+
 ## Account fixtures (committed JSON: `{ pubkey, dataB64, owner, lamports, space }`)
 
 - `squads-program-config.json` — Squads v4 `ProgramConfig` PDA
