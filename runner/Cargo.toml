@@ -34,3 +34,26 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 thiserror = "2"
 async-trait = "0.1"
+
+# Build + SIGN the `submit_ai_claim` transaction with the split, granular
+# solana-* crates (correct legacy-message serialization + ed25519 signing) —
+# deliberately NOT `solana-sdk` / `solana-client`. Send + confirm rides the same
+# reqwest `JsonRpc` transport as the I3 fetch (see `rpc.rs`), so no second RPC
+# stack. `curve25519` on solana-pubkey enables host-side PDA derivation
+# (`find_program_address`); `bincode` on solana-transaction enables the wire
+# serialization + `Transaction::new`/`sign`. These are host-only deps for the
+# runner binary and do not touch the on-chain (pinocchio) program.
+solana-pubkey = { version = "2", features = ["curve25519"] }
+solana-hash = "2"
+solana-instruction = "2"
+solana-message = "2"
+solana-keypair = "2"
+solana-signer = "2"
+solana-transaction = { version = "2", features = ["bincode"] }
+bincode = "1"
+
+[dev-dependencies]
+# The `verify` feature adds `Transaction::verify()` for the offline sign tests
+# (ed25519 signature check against the payer pubkey) without shipping it in the
+# release binary.
+solana-transaction = { version = "2", features = ["bincode", "verify"] }
