@@ -366,6 +366,76 @@ fn load_config(path: Option<&Path>) -> anyhow::Result<RunnerConfig> {
     serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("invalid config JSON: {e}"))
 }
 
+/// Build a [`RunnerConfig`] by reading the oracle + its agreed facts over RPC
+/// and pairing them with a verified off-chain interpretation.
+///
+/// Generic over [`crate::rpc::JsonRpc`] so it is testable offline with
+/// [`crate::rpc::MockRpc`]. Fetches the `Oracle` (owner + `AccountType` tag
+/// verified, then Pod-decoded via the shared struct), asserts
+/// `sha256(prompt_text) == oracle.prompt_hash` (REJECTS a mismatch), enumerates
+/// the AGREED facts, and assembles the config: `options_count`/`deadline`-backed
+/// facts from chain, the interpretation from the prompt text.
+pub async fn build_config_from_chain(
+    rpc: &dyn crate::rpc::JsonRpc,
+    oracle_pubkey: &str,
+    prompt_text: String,
+) -> anyhow::Result<RunnerConfig> {
+    let oracle = crate::rpc::fetch_oracle(rpc, oracle_pubkey).await?;
+    // The interpretation TEXT is off-chain; assert it hashes to the on-chain
+    // prompt_hash commitment before it is ever used (mirrors the fact
+    // content_hash verification).
+    crate::rpc::verify_prompt_hash(&prompt_text, &oracle.prompt_hash)?;
+
+    let facts = crate::rpc::fetch_agreed_facts(rpc, oracle_pubkey).await?;
+    let facts = facts
+        .into_iter()
+        .map(|f| FactInput {
+            content_hash: to_hex(&f.content_hash),
+            uri: f.uri,
+        })
+        .collect();
+
+    Ok(RunnerConfig {
+        interpretation: prompt_text,
+        options_count: oracle.options_count,
+        option_labels: None,
+        facts,
+        oracle: Some(oracle_pubkey.to_string()),
+        proposer: None,
+    })
+}
+
+/// Resolve the [`RunnerConfig`] for a command from its [`CommonArgs`]: either
+/// the explicit JSON config (`--config`/stdin) or the on-chain fetch
+/// (`--oracle` + `--rpc-url` + `--prompt-file`). The two modes are mutually
+/// exclusive.
+async fn resolve_config(common: &CommonArgs) -> anyhow::Result<RunnerConfig> {
+    match &common.oracle {
+        Some(oracle) => {
+            if common.config.is_some() {
+                anyhow::bail!("--oracle and --config are mutually exclusive");
+            }
+            let rpc_url = common
+                .rpc_url
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("--oracle requires --rpc-url <url>"))?;
+            let prompt_file = common
+                .prompt_file
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("--oracle requires --prompt-file <path>"))?;
+            let prompt_text = std::fs::read_to_string(prompt_file).map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to read prompt file `{}`: {e}",
+                    prompt_file.display()
+                )
+            })?;
+            let rpc = crate::rpc::HttpJsonRpc::new(rpc_url.clone())?;
+            build_config_from_chain(&rpc, oracle, prompt_text).await
+        }
+        None => load_config(common.config.as_deref()),
+    }
+}
+
 /// Whether to use the mock provider (the `--mock` flag or `KASSANDRA_RUNNER_MOCK`
 /// set non-empty).
 fn use_mock(flag: bool) -> bool {
@@ -399,9 +469,24 @@ pub enum Command {
 /// Shared provider/config options.
 #[derive(Debug, Parser)]
 pub struct CommonArgs {
-    /// Path to the JSON config; if omitted, the config is read from stdin.
+    /// Path to the JSON config; if omitted (and no `--oracle`), read from stdin.
     #[arg(long)]
     pub config: Option<PathBuf>,
+    /// Build the config from an on-chain oracle (base58 pubkey) instead of a
+    /// JSON `--config`: the oracle's `options_count`/`deadline`/agreed facts are
+    /// read over RPC, and the interpretation comes from `--prompt-file` (whose
+    /// sha256 must equal the on-chain `prompt_hash`). Requires `--rpc-url` +
+    /// `--prompt-file`; mutually exclusive with `--config`.
+    #[arg(long)]
+    pub oracle: Option<String>,
+    /// Solana JSON-RPC url used with `--oracle`.
+    #[arg(long)]
+    pub rpc_url: Option<String>,
+    /// Path to the interpretation prompt-text file used with `--oracle`; its
+    /// sha256 must equal the on-chain `oracle.prompt_hash` (else the run is
+    /// rejected).
+    #[arg(long)]
+    pub prompt_file: Option<PathBuf>,
     /// Use the deterministic MockProvider (offline; no API key needed). Also
     /// enabled by setting KASSANDRA_RUNNER_MOCK.
     #[arg(long)]
@@ -456,7 +541,7 @@ pub async fn run_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Run(args) => {
-            let config = load_config(args.common.config.as_deref())?;
+            let config = resolve_config(&args.common).await?;
             let model_config = build_model_config(args.common.model, args.common.max_tokens);
             let fetcher = HttpFactFetcher::new()?;
             let provider = build_provider(args.common.mock)?;
@@ -464,7 +549,7 @@ pub async fn run_cli() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&out)?);
         }
         Command::Verify(args) => {
-            let config = load_config(args.common.config.as_deref())?;
+            let config = resolve_config(&args.common).await?;
             let model_config = build_model_config(args.common.model, args.common.max_tokens);
             let fetcher = HttpFactFetcher::new()?;
             let provider = build_provider(args.common.mock)?;
@@ -653,6 +738,126 @@ mod tests {
         assert!(out.model_id_check.unwrap().matches);
         assert!(out.params_hash_check.unwrap().matches);
         assert!(!out.io_hash_check.unwrap().matches);
+    }
+
+    // --- on-chain config build (offline via MockRpc) -----------------------
+
+    #[tokio::test]
+    async fn build_config_from_chain_assembles_and_runs() {
+        use crate::rpc::MockRpc;
+        use bytemuck::Zeroable;
+        use kassandra_program::state::{AccountType, Fact, Oracle};
+        use serde_json::json;
+
+        let oracle_pk = "So11111111111111111111111111111111111111112";
+        let oracle_bytes: [u8; 32] = bs58::decode(oracle_pk)
+            .into_vec()
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        let interpretation = "Resolve YES if BTC closed at or above $100,000; otherwise NO.";
+        let prompt_hash: [u8; 32] = Sha256::digest(interpretation.as_bytes()).into();
+
+        // Oracle (Pod bytes) with 2 options + the prompt_hash commitment.
+        let mut oracle = Oracle::zeroed();
+        oracle.account_type = AccountType::Oracle.as_u8();
+        oracle.options_count = 2;
+        oracle.deadline = 1_900_000_000;
+        oracle.prompt_hash = prompt_hash;
+
+        // One agreed fact whose off-chain content the mock fetcher serves.
+        let fact_content = b"BTC closed at $98,000.";
+        let content_hash: [u8; 32] = Sha256::digest(fact_content).into();
+        let fact_uri = "https://facts.example/btc";
+        let mut fact = Fact::zeroed();
+        fact.account_type = AccountType::Fact.as_u8();
+        fact.oracle = oracle_bytes;
+        fact.content_hash = content_hash;
+        fact.uri_len = fact_uri.len() as u16;
+        fact.uri[..fact_uri.len()].copy_from_slice(fact_uri.as_bytes());
+        fact.agreed = 1;
+
+        let owner = MockRpc::program_owner();
+        let rpc = MockRpc::new()
+            .with(
+                "getAccountInfo",
+                json!({
+                    "context": { "slot": 1 },
+                    "value": {
+                        "data": [MockRpc::base64(bytemuck::bytes_of(&oracle)), "base64"],
+                        "owner": owner,
+                        "lamports": 1u64, "executable": false, "rentEpoch": 0u64,
+                        "space": Oracle::LEN,
+                    }
+                }),
+            )
+            .with(
+                "getProgramAccounts",
+                json!([{
+                    "pubkey": "Fact111111111111111111111111111111111111111",
+                    "account": {
+                        "data": [MockRpc::base64(bytemuck::bytes_of(&fact)), "base64"],
+                        "owner": owner,
+                        "lamports": 1u64, "executable": false, "rentEpoch": 0u64,
+                        "space": Fact::LEN,
+                    }
+                }]),
+            );
+
+        // Build the config from chain + the verified interpretation.
+        let config = build_config_from_chain(&rpc, oracle_pk, interpretation.to_string())
+            .await
+            .unwrap();
+        assert_eq!(config.options_count, 2);
+        assert_eq!(config.facts.len(), 1);
+        assert_eq!(config.facts[0].content_hash, sha256_hex(fact_content));
+        assert_eq!(config.facts[0].uri, fact_uri);
+        assert_eq!(config.oracle.as_deref(), Some(oracle_pk));
+
+        // And it drives the existing pipeline (fact fetch + mock provider).
+        let fetcher = MockFactFetcher::new().with(fact_uri, fact_content.to_vec());
+        let provider = MockProvider::new(0, r#"{"option_index":0}"#, "mock-claude");
+        let out = run_core(&config, build_model_config(None, None), &fetcher, &provider)
+            .await
+            .unwrap();
+        assert_eq!(out.option_index, 0);
+    }
+
+    #[tokio::test]
+    async fn build_config_from_chain_rejects_prompt_mismatch() {
+        use crate::rpc::MockRpc;
+        use bytemuck::Zeroable;
+        use kassandra_program::state::{AccountType, Oracle};
+        use serde_json::json;
+
+        let oracle_pk = "So11111111111111111111111111111111111111112";
+        let committed = "the real interpretation";
+        let prompt_hash: [u8; 32] = Sha256::digest(committed.as_bytes()).into();
+
+        let mut oracle = Oracle::zeroed();
+        oracle.account_type = AccountType::Oracle.as_u8();
+        oracle.options_count = 2;
+        oracle.prompt_hash = prompt_hash;
+
+        let rpc = MockRpc::new().with(
+            "getAccountInfo",
+            json!({
+                "context": { "slot": 1 },
+                "value": {
+                    "data": [MockRpc::base64(bytemuck::bytes_of(&oracle)), "base64"],
+                    "owner": MockRpc::program_owner(),
+                    "lamports": 1u64, "executable": false, "rentEpoch": 0u64,
+                    "space": Oracle::LEN,
+                }
+            }),
+        );
+
+        // A prompt file that does NOT match the on-chain prompt_hash → rejected.
+        let err = build_config_from_chain(&rpc, oracle_pk, "a tampered interpretation".to_string())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("prompt_hash mismatch"), "{err}");
     }
 
     fn parse_payload(hex: &str) -> Vec<u8> {

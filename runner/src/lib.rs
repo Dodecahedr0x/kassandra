@@ -20,3 +20,4 @@ pub mod fetch;
 pub mod hashing;
 pub mod prompt;
 pub mod provider;
+pub mod rpc;

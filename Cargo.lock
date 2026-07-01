@@ -1782,6 +1782,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
+ "bs58",
+ "bytemuck",
  "clap",
  "kassandra-program",
  "reqwest 0.12.28",

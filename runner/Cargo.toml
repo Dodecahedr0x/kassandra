@@ -21,6 +21,13 @@ kassandra-program = { path = "../programs/kassandra", features = ["no-entrypoint
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 sha2 = "0.10"
+# Pod-decode the shared on-chain account structs read over RPC (Task I3).
+bytemuck = { version = "1", features = ["min_const_generics"] }
+# Base58 pubkey <-> bytes (owner verification) + base64 account-data decode for
+# the JSON-RPC getAccountInfo/getProgramAccounts responses (Task I3). Both are
+# small, pure-Rust; no solana-client / solana-sdk pulled in.
+bs58 = "0.5"
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }

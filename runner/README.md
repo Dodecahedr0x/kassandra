@@ -98,7 +98,11 @@ payload anchor.
 
 ## How to run
 
-The runner reads a JSON config from `--config <path>` or stdin.
+The runner builds its config in one of two mutually-exclusive ways:
+
+1. an explicit **JSON config** from `--config <path>` or stdin (below), or
+2. an **on-chain fetch** from `--oracle <pubkey> --rpc-url <url> --prompt-file
+   <path>` (see [On-chain config mode](#on-chain-config-mode)).
 
 ### Config JSON shape
 
@@ -126,6 +130,48 @@ The runner reads a JSON config from `--config <path>` or stdin.
   any mismatch**.
 - `oracle` / `proposer` — optional; only echoed to describe the AiClaim PDA seeds
   (`[b"claim", oracle, proposer]`).
+
+### On-chain config mode
+
+Instead of an explicit `--config`, the runner can build the config directly from
+an oracle account on chain:
+
+```sh
+kassandra-runner run \
+  --oracle <ORACLE_PUBKEY_BASE58> \
+  --rpc-url https://api.mainnet-beta.solana.com \
+  --prompt-file interpretation.txt \
+  --mock
+```
+
+What it does:
+
+- **`getAccountInfo`** (base64) for the oracle account → verifies it is owned by
+  the Kassandra program and carries the `Oracle` account-type tag → `bytemuck`
+  decodes it through the **shared `kassandra_program::state::Oracle`** struct,
+  reading `options_count`, `deadline`, and the `prompt_hash` commitment.
+- **`getProgramAccounts`** with a `dataSize == Fact::LEN` filter and a `memcmp`
+  on the `Fact.oracle` field enumerates this oracle's `Fact` accounts, decodes
+  each through the shared `Fact` struct, and keeps the ones whose `agreed` flag
+  is set → their `content_hash` + `uri` become the fact set (fetched and
+  hash-verified exactly as in the explicit-config path).
+- The interpretation **TEXT** is **not** on chain — only its `prompt_hash` is.
+  So it is read from `--prompt-file`, and the runner asserts
+  **`sha256(prompt_file_bytes) == oracle.prompt_hash`**, mirroring the fact
+  `content_hash` check. **A mismatch is rejected** — a wrong or tampered prompt
+  file can never be fed to the model as this oracle's interpretation.
+
+Transport is plain JSON-RPC over the same `reqwest` stack the fact fetcher uses —
+there is **no `solana-client`/`solana-sdk` dependency**. `--oracle` requires both
+`--rpc-url` and `--prompt-file` and is mutually exclusive with `--config`.
+
+> **Prompt-hash requirement.** The prompt file must contain the oracle's
+> interpretation text verbatim, byte-for-byte, such that its SHA-256 equals the
+> on-chain `prompt_hash` the oracle was created with (the same plain-SHA-256,
+> no-framing convention the fact `content_hash` uses). Keep the exact text that
+> was hashed at `create_oracle` time.
+
+`verify` accepts the same `--oracle/--rpc-url/--prompt-file` flags.
 
 ### `run` — resolve and emit the claim
 
@@ -160,7 +206,10 @@ provided, the submitted hashes) to a submitted claim, advising
 
 | Flag | Meaning |
 |------|---------|
-| `--config <path>` | Config JSON path; omit to read from stdin. |
+| `--config <path>` | Config JSON path; omit to read from stdin. Mutually exclusive with `--oracle`. |
+| `--oracle <pubkey>` | Build the config from this on-chain oracle instead of `--config`. Requires `--rpc-url` + `--prompt-file`. |
+| `--rpc-url <url>` | Solana JSON-RPC url used with `--oracle`. |
+| `--prompt-file <path>` | Interpretation text file used with `--oracle`; its `sha256` must equal the on-chain `prompt_hash`. |
 | `--mock` | Use the deterministic `MockProvider` (offline, no key). Also enabled by `KASSANDRA_RUNNER_MOCK=1`. |
 | `--model <str>` | Override the pinned model string (default `claude-opus-4-8`). |
 | `--max-tokens <n>` | Override `max_tokens` (default `4096`). |
@@ -225,9 +274,13 @@ To independently reproduce an `AiClaim` from the same inputs:
 
 Deliberate, documented scope boundaries for v1:
 
-- **No on-chain RPC fetch.** The oracle config (interpretation, options, facts)
-  is an explicit input; the runner does not read the oracle/fact accounts from
-  chain. (An RPC layer can be added later.)
+- **On-chain fetch is read-only + prompt-file-paired.** The runner reads the
+  oracle/fact accounts over JSON-RPC (see [On-chain config
+  mode](#on-chain-config-mode)), but the interpretation TEXT is not on chain, so
+  the on-chain fetch MUST be paired with a `--prompt-file` whose `sha256` matches
+  the on-chain `prompt_hash`. The RPC client has no retry/failover and reads at
+  `confirmed` commitment; `getProgramAccounts` enumeration requires an RPC that
+  serves it (some providers gate or paginate it for large programs).
 - **No transaction submission.** The runner emits the 97-byte payload (hex) for
   the SDK/CLI to submit; it never signs or sends a transaction.
 - **SSRF to internal IPs is not blocked.** The fetcher's scheme allowlist stops
