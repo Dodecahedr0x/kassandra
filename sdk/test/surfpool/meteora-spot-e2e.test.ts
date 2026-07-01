@@ -186,7 +186,7 @@ describe.skipIf(!ENABLED)("surfpool Meteora DAMM v2 spot path on FORKED mainnet 
     expect(Number(hi) / Number(lo)).toBeLessThan(1.01);
   }, 60_000);
 
-  it("drives initializePool → addLiquidity → swap → createPosition through the REAL cp-amm", async () => {
+  it("drives initializePool → addLiquidity → swap → createPosition → claimPositionFee → removeLiquidity through the REAL cp-amm", async () => {
     const config = REAL_CONFIG;
     const poolAddr = (await meteora.pda.pool(config, f.mintA, f.mintB)).address;
     const tokenAVault = (await meteora.pda.tokenVault(f.mintA, poolAddr)).address;

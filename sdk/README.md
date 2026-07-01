@@ -157,7 +157,8 @@ transactions off-chain):
   (offline byte test) and **layout-verified LIVE** against the deployed futarchy by
   the gated fork E2E `test/surfpool/futarchy-meteora-treasury-e2e.test.ts`, which
   drives the builder to the deployed program's admin gate (rejected at
-  `InvalidAdmin`/6020 only AFTER all 27 accounts deserialize). The **full live
+  `InvalidAdmin`/6020, which `try_accounts` reaches only AFTER accepting the full
+  27-account layout). The **full live
   sweep is DEFERRED** — it requires the MetaDAO-controlled `production` admin
   signer (`tSTp6B6k…`), so it can't be driven on a fork.
 

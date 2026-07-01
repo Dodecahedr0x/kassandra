@@ -20,16 +20,18 @@
  *
  * ── What this test DOES prove (the valuable, genuine partial) ─────────────────
  * `#[access_control(validate())]` runs only AFTER Anchor's `try_accounts` has
- * DESERIALIZED + constraint-checked ALL 27 accounts (the `Account<Dao>` +
+ * ACCEPTED the full 27-account layout (order/count/roles) — deserializing +
+ * constraint-checking the TYPED accounts among them (the `Account<Dao>` +
  * base/quote-mint `constraint`s, the Squads `Multisig` PDA `seeds`, the
  * `associated_token` fee-recipient ATAs, the `pool_authority` / permissionless
  * `address` constraints, the `Program<…>` ids, and the `#[event_cpi]` tail). So a
  * rejection SPECIFICALLY at `InvalidAdmin` (Anchor custom error **6020**) — and
  * NOT at an earlier `ConstraintSeeds`/`AccountNotInitialized`/`ConstraintAddress`/
  * `ConstraintRaw` error — is a live PROOF that the F2a builder's 27-account wire
- * format DESERIALIZES CORRECTLY on the DEPLOYED futarchy binary. A wire-format bug
- * (wrong order / role / PDA seeds / missing account) would fail EARLIER with a
- * different error, never reaching the admin gate.
+ * format is ACCEPTED (correct order / roles / typed-account & PDA-seed & address
+ * constraints) on the DEPLOYED futarchy binary. A wire-format bug (wrong order /
+ * role / PDA seeds / missing account) would fail EARLIER with a different error,
+ * never reaching the admin gate.
  *
  * Arms:
  *   1. REACH-THE-ADMIN-GATE — real `initialize_dao` (creates a genuine `Dao` +
@@ -37,7 +39,8 @@
  *      (owned by the MetaDAO vault `6awyHMsh…`) → build `collectMeteoraDammFees`
  *      with a STAND-IN admin (our payer, ≠ the production admin) + the real public
  *      permissionless signer → submit to the REAL deployed futarchy → ASSERT it
- *      is rejected at `InvalidAdmin` (6020), proving all 27 accounts deserialized.
+ *      is rejected at `InvalidAdmin` (6020), proving the 27-account layout is
+ *      accepted by `try_accounts` on the deployed binary.
  *   2. REAL-ACCOUNT CROSS-VERIFICATION — clone a REAL mainnet futarchy `Dao`,
  *      derive its Squads multisig/vault via the SAME PDA derivers the builder
  *      uses, and assert the derivations match the Dao's own recorded
@@ -155,7 +158,7 @@ describe.skipIf(!ENABLED)("surfpool futarchy→Meteora treasury fee-collection o
     expect(msInfo.owner).toBe(futarchy.SQUADS_V4_ID.toString());
   }, 90_000);
 
-  it("REACH-THE-ADMIN-GATE: collectMeteoraDammFees deserializes 27 accounts on the DEPLOYED futarchy, rejected at InvalidAdmin (6020)", async () => {
+  it("REACH-THE-ADMIN-GATE: collectMeteoraDammFees 27-account layout accepted by the DEPLOYED futarchy, rejected at InvalidAdmin (6020)", async () => {
     // --- (1) real initialize_dao → genuine Dao + Squads multisig/vault --------
     // Squads ProgramConfig.treasury is NOT a PDA — read it live (treasury @48).
     const programConfig = (await futarchy.pda.squadsProgramConfig()).address;
