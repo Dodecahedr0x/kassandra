@@ -362,8 +362,16 @@ function OracleBody({
         </Card>
       </div>
 
-      {/* Participate — the wallet-signed write forms, phase-gated (WF2). */}
-      <OracleActions pubkey={pubkey} oracle={oracle} refetch={refetch} />
+      {/* Participate — the wallet-signed write forms + permissionless finalize
+          cranks, phase-gated (WF2/RF1). The finalize tails are the proposer /
+          fact PDA pubkeys from the already-fetched detail. */}
+      <OracleActions
+        pubkey={pubkey}
+        oracle={oracle}
+        refetch={refetch}
+        proposers={proposers.map((p) => p.pubkey)}
+        facts={facts.map((f) => f.pubkey)}
+      />
 
       {/* Parameters */}
       <Section title="Parameters">
