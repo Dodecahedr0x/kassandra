@@ -9,6 +9,7 @@ import { PhaseChip } from '../components/oracles/PhaseChip'
 import { PhaseTimeline } from '../components/oracles/PhaseTimeline'
 import { EconomicPanel } from '../components/oracles/EconomicPanel'
 import { ChallengeMarketPanel } from '../components/oracles/ChallengeMarketPanel'
+import { ChallengeTradeControls } from '../components/oracles/actions/ChallengeTradeControls'
 import { Truncated } from '../components/oracles/Truncated'
 import { verdictFor } from '../lib/phaseTimeline'
 import { ClaimControl, CloseControl, OracleActions, VoteControl } from '../components/oracles/actions'
@@ -493,6 +494,8 @@ function OracleBody({
   const resolved = oracle.phase === Phase.Resolved
   const hasResolvedOption = resolved && oracle.resolvedOption !== RESOLVED_OPTION_NONE
   const votingOpen = oracle.phase === Phase.FactVoting
+  // The trade/crank/settle controls live only while the challenge round is open.
+  const tradeOpen = oracle.phase === Phase.Challenge || oracle.phase === Phase.FinalRecompute
   // Terminal phases open the claim / close / sweep payout controls.
   const settleOpen = oracle.phase === Phase.Resolved || oracle.phase === Phase.InvalidDeadend
   const settle: SettleCtx | undefined = settleOpen
@@ -641,6 +644,14 @@ function OracleBody({
           <>
             <MarketCard pubkey={market.pubkey} market={market.market} settle={settle} />
             <ChallengeMarketPanel market={market.market} oracle={oracle} />
+            {tradeOpen ? (
+              <ChallengeTradeControls
+                oraclePubkey={pubkey}
+                oracle={oracle}
+                market={market.market}
+                refetch={refetch}
+              />
+            ) : null}
           </>
         ) : (
           emptyNote('No challenge market opened for this oracle.')
