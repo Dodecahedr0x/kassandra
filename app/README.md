@@ -6,7 +6,15 @@ Vite + React 19 + TypeScript + Tailwind v4 SPA, styled in the **Delphi** visual 
 
 ## Run / build
 
+> **Build the SDK first.** The app links `@kassandra/sdk` via the pnpm workspace and
+> resolves its types from `sdk/dist/` (which is gitignored). On a fresh clone, run
+> `pnpm --filter @kassandra/sdk build` (or `pnpm -r build`) **before** the app's
+> typecheck/build, or the SDK import won't resolve. (Slice 1 only link-proofs the
+> import; the functional-dApp milestone will depend on the SDK types for real, so CI
+> must build the SDK first.)
+
 ```bash
+pnpm --filter @kassandra/sdk build   # build the SDK first (types → sdk/dist)
 pnpm --filter app dev        # dev server (HMR)
 pnpm --filter app typecheck  # tsc -b
 pnpm --filter app lint       # oxlint
