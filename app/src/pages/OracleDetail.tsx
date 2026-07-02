@@ -525,6 +525,7 @@ function OracleBody({
         refetch={refetch}
         proposers={proposers.map((p) => p.pubkey)}
         facts={facts.map((f) => f.pubkey)}
+        market={market}
       />
 
       {/* Parameters */}

@@ -1,4 +1,4 @@
-import { Phase, type Oracle } from '@kassandra/sdk'
+import { Phase, type Market, type Oracle } from '@kassandra/sdk'
 import { Card } from '../../ui'
 import { phaseView } from '../../../lib/oracleView'
 import { recallNonce } from '../../../lib/nonceStore'
@@ -12,6 +12,8 @@ import {
 } from '../../../data/actions/finalize'
 import { ProposeForm } from './ProposeForm'
 import { SubmitFactForm } from './SubmitFactForm'
+import { SubmitAiClaimForm } from './SubmitAiClaimForm'
+import { ChallengeControl } from './ChallengeControl'
 import { FinalizeControl } from './FinalizeControl'
 import { SweepControl } from './SweepControl'
 
@@ -42,6 +44,7 @@ export function OracleActions({
   refetch,
   proposers = [],
   facts = [],
+  market,
 }: {
   pubkey: string
   oracle: Oracle
@@ -50,6 +53,8 @@ export function OracleActions({
   proposers?: string[]
   /** Fact-PDA pubkeys (the finalize-facts tail). */
   facts?: string[]
+  /** The first challenge market (if open) — the RF4 challenge status + settle-crank. */
+  market?: { pubkey: string; market: Market }
 }) {
   const phaseLabel = phaseView(oracle.phase).label
   const kassMint = oracle.kassMint
@@ -110,31 +115,37 @@ export function OracleActions({
             />
           </>
         ) : oracle.phase === Phase.AiClaim ? (
-          <FinalizeControl
-            title="Finalize AI claims"
-            description="Once the AI-claim window has closed, finalize the submitted claims and crank the oracle into the challenge round."
-            verb="Finalize AI claims"
-            successVerb="Finalized"
-            refetch={refetch}
-            build={() => buildFinalizeAiClaimsIxs({ oracle: pubkey, proposers })}
-          />
+          <>
+            <SubmitAiClaimForm pubkey={pubkey} oracle={oracle} refetch={refetch} />
+            <FinalizeControl
+              title="Finalize AI claims"
+              description="Once the AI-claim window has closed, finalize the submitted claims and crank the oracle into the challenge round."
+              verb="Finalize AI claims"
+              successVerb="Finalized"
+              refetch={refetch}
+              build={() => buildFinalizeAiClaimsIxs({ oracle: pubkey, proposers })}
+            />
+          </>
         ) : oracle.phase === Phase.Challenge || oracle.phase === Phase.FinalRecompute ? (
-          <FinalizeControl
-            title="Finalize oracle"
-            description="Once the challenge window has closed (and no challenge markets remain open), finalize the oracle to its resolved option."
-            verb="Finalize oracle"
-            successVerb="Finalized"
-            nearCap={proposersNearCap}
-            refetch={refetch}
-            build={() =>
-              buildFinalizeOracleIxs({
-                oracle: pubkey,
-                kassMint,
-                proposers,
-                oracleNonce: recallNonce(pubkey) ?? undefined,
-              })
-            }
-          />
+          <>
+            <ChallengeControl pubkey={pubkey} oracle={oracle} market={market} refetch={refetch} />
+            <FinalizeControl
+              title="Finalize oracle"
+              description="Once the challenge window has closed (and no challenge markets remain open), finalize the oracle to its resolved option."
+              verb="Finalize oracle"
+              successVerb="Finalized"
+              nearCap={proposersNearCap}
+              refetch={refetch}
+              build={() =>
+                buildFinalizeOracleIxs({
+                  oracle: pubkey,
+                  kassMint,
+                  proposers,
+                  oracleNonce: recallNonce(pubkey) ?? undefined,
+                })
+              }
+            />
+          </>
         ) : oracle.phase === Phase.Resolved || oracle.phase === Phase.InvalidDeadend ? (
           <>
             <Note>
