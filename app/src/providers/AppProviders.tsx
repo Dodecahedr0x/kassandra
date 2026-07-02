@@ -7,6 +7,8 @@ import {
 } from '@solana/wallet-adapter-wallets'
 
 import { ClusterProvider } from '../lib/ClusterProvider'
+import { isMockMode } from '../data/mockOracles'
+import { MockWalletProvider } from '../lib/mockWallet'
 
 // Wallet-adapter base styles are imported + overridden to the Delphi look in
 // index.css (no default purple/dark leaks through — we never render the
@@ -28,11 +30,22 @@ export function AppProviders({ children }: { children: ReactNode }) {
     [],
   )
 
+  // Render-only affordance: under mock mode a scripted wallet replaces the real
+  // WalletProvider so the write-form STATES are headless-reviewable without an
+  // automatable browser wallet (see `lib/mockWallet`). Never active live.
+  const WalletShell = isMockMode()
+    ? ({ children: c }: { children: ReactNode }) => <MockWalletProvider>{c}</MockWalletProvider>
+    : ({ children: c }: { children: ReactNode }) => (
+        <WalletProvider wallets={wallets} autoConnect>
+          {c}
+        </WalletProvider>
+      )
+
   return (
     <ClusterProvider>
-      <WalletProvider wallets={wallets} autoConnect>
+      <WalletShell>
         <WalletModalProvider>{children}</WalletModalProvider>
-      </WalletProvider>
+      </WalletShell>
     </ClusterProvider>
   )
 }

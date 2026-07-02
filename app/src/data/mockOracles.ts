@@ -126,6 +126,36 @@ const ORACLES: OracleSummary[] = [
     }),
   },
   {
+    pubkey: 'OracLeFactPropoSaL11111111111111111111111111',
+    oracle: makeOracle({
+      deadline: secs(-1),
+      phaseEndsAt: secs(0.4),
+      phaseRaw: Phase.FactProposal,
+      phase: Phase.FactProposal,
+      optionsCount: 3,
+      proposerCount: 2,
+      survivingCount: 2,
+      factCount: 0,
+      bondPool: 8_000_000_000n,
+      promptHash: hashBytes(66),
+    }),
+  },
+  {
+    pubkey: 'OracLeFactVoting1111111111111111111111111111',
+    oracle: makeOracle({
+      deadline: secs(-1),
+      phaseEndsAt: secs(0.35),
+      phaseRaw: Phase.FactVoting,
+      phase: Phase.FactVoting,
+      optionsCount: 2,
+      proposerCount: 2,
+      survivingCount: 2,
+      factCount: 2,
+      bondPool: 9_000_000_000n,
+      promptHash: hashBytes(77),
+    }),
+  },
+  {
     pubkey: 'OracLeAiCLaim11111111111111111111111111111111',
     oracle: makeOracle({
       deadline: secs(-1),
@@ -318,7 +348,9 @@ export function mockOracles(): OracleSummary[] {
 export function mockOracleDetail(pubkey: string): Promise<OracleDetail> {
   const summary = ORACLES.find((o) => o.pubkey === pubkey)
   if (!summary) return Promise.reject(new OracleNotFoundError(pubkey))
-  const rich = pubkey === 'OracLeChaLLenged11111111111111111111111111111'
+  const rich =
+    pubkey === 'OracLeChaLLenged11111111111111111111111111111' ||
+    pubkey === 'OracLeFactVoting1111111111111111111111111111'
   const kids = rich
     ? childrenFor(pubkey)
     : { facts: [], proposers: [], aiClaims: [], market: undefined }

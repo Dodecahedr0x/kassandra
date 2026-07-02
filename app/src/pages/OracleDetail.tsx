@@ -2,10 +2,12 @@ import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { CLAIM_OPTION_NONE, Phase } from '@kassandra/sdk'
 import type { AiClaim, Fact, Market, Proposer } from '@kassandra/sdk'
+import type { Address } from '@solana/web3.js'
 import { AvatarBubble, Button, Card, EyebrowTag } from '../components/ui'
 import { Chip } from '../components/oracles/Chip'
 import { PhaseChip } from '../components/oracles/PhaseChip'
 import { Truncated } from '../components/oracles/Truncated'
+import { OracleActions, VoteControl } from '../components/oracles/actions'
 import { useOracleDetail } from '../hooks/useOracles'
 import { OracleNotFoundError } from '../data/oracles'
 import { CLUSTER_LABELS, useCluster } from '../lib/cluster'
@@ -66,7 +68,16 @@ const emptyNote = (text: string) => (
   <p className="font-inter text-[14px] text-driftwood">{text}</p>
 )
 
-function FactCard({ pubkey, fact }: { pubkey: string; fact: Fact }) {
+function FactCard({
+  pubkey,
+  fact,
+  voting,
+}: {
+  pubkey: string
+  fact: Fact
+  /** When set (FactVoting phase), renders the per-fact vote control. */
+  voting?: { oracle: string; kassMint: Address; refetch: () => void }
+}) {
   return (
     <Card className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -107,6 +118,14 @@ function FactCard({ pubkey, fact }: { pubkey: string; fact: Fact }) {
           {fact.uri.length > 0 ? fact.uri : '—'}
         </p>
       </div>
+      {voting ? (
+        <VoteControl
+          oracle={voting.oracle}
+          kassMint={voting.kassMint}
+          factPubkey={pubkey}
+          refetch={voting.refetch}
+        />
+      ) : null}
     </Card>
   )
 }
@@ -275,17 +294,24 @@ export default function OracleDetail() {
           </Card>
         </div>
       ) : data ? (
-        <OracleBody detail={data} />
+        <OracleBody detail={data} refetch={refetch} />
       ) : null}
     </main>
   )
 }
 
 /** The loaded oracle, laid out editorially. Split out so the states above stay readable. */
-function OracleBody({ detail }: { detail: NonNullable<ReturnType<typeof useOracleDetail>['data']> }) {
+function OracleBody({
+  detail,
+  refetch,
+}: {
+  detail: NonNullable<ReturnType<typeof useOracleDetail>['data']>
+  refetch: () => void
+}) {
   const { pubkey, oracle, facts, proposers, aiClaims, market } = detail
   const resolved = oracle.phase === Phase.Resolved
   const hasResolvedOption = resolved && oracle.resolvedOption !== RESOLVED_OPTION_NONE
+  const votingOpen = oracle.phase === Phase.FactVoting
 
   return (
     <>
@@ -336,6 +362,9 @@ function OracleBody({ detail }: { detail: NonNullable<ReturnType<typeof useOracl
         </Card>
       </div>
 
+      {/* Participate — the wallet-signed write forms, phase-gated (WF2). */}
+      <OracleActions pubkey={pubkey} oracle={oracle} refetch={refetch} />
+
       {/* Parameters */}
       <Section title="Parameters">
         <Card>
@@ -363,7 +392,14 @@ function OracleBody({ detail }: { detail: NonNullable<ReturnType<typeof useOracl
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {facts.map((f) => (
-              <FactCard key={f.pubkey} pubkey={f.pubkey} fact={f.fact} />
+              <FactCard
+                key={f.pubkey}
+                pubkey={f.pubkey}
+                fact={f.fact}
+                voting={
+                  votingOpen ? { oracle: pubkey, kassMint: oracle.kassMint, refetch } : undefined
+                }
+              />
             ))}
           </div>
         )}

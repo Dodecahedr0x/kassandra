@@ -37,7 +37,8 @@ Roboto Mono 400) — the build is fully offline (no hotlinked CDNs or images).
   counts, resolved option). Read-only.
 - `/oracles/:pubkey` — the oracle detail view (`src/pages/OracleDetail.tsx`): an editorial
   layout of one oracle + its facts, proposers, AI claims, and challenge market, with
-  copy-on-click truncated pubkeys/hashes. Read-only.
+  copy-on-click truncated pubkeys/hashes. Read-only browsing works fully disconnected; the
+  wallet-signed **write forms** (below) are additive on top.
 
 ### RPC / cluster config
 
@@ -53,6 +54,28 @@ with loading/error/refetch and re-fetch when the cluster/connection changes.
 `app/test/oracle-data.e2e.test.ts`), then `pnpm --filter app dev` with the cluster on
 **Localnet** (or `VITE_RPC_URL` pointed at the surfpool RPC) and open `/oracles`.
 
+### Write flows (wallet-signed)
+
+The detail page carries a **Participate** surface plus per-fact vote controls — three
+wallet-signed actions, each gated on a connected wallet **and** the oracle's current phase:
+
+- **Propose** (Proposal phase): pick an option + escrow a **KASS** bond.
+- **Submit fact** (FactProposal phase): a content hash (hash pasted text, or paste a 32-byte
+  hex hash) + an off-chain URI (≤200 bytes) + a KASS stake.
+- **Vote** (FactVoting phase): Approve or flag Duplicate on each fact + a KASS stake.
+
+Every action **requires KASS** — the bond/stake is escrowed to the oracle's stake vault (amounts
+are raw base units, matching the read view; a missing KASS ATA is created idempotently on the
+first action). Forms wrap the pure WF1 action layer (`src/data/actions.ts` `build*Ixs`) and send
+via wallet-adapter's `sendTransaction`; `src/hooks/useWriteAction.ts` + `src/data/writeAction.ts`
+drive the status **idle → building → signing (wallet prompt) → confirming → success/error**.
+On success the confirmation line shows the signature (+ a Solana-Explorer link off localnet) and
+the oracle detail **refetches**. Errors are human-readable: validation shows inline before submit,
+a user cancel reads "Transaction rejected in wallet.", and a failed send shows the message + the
+program logs. **Disconnected** → the read view is unchanged and each form shows "Connect a wallet
+to participate."; **wrong phase** → a muted "Participation is closed — this oracle is in the
+{phase} phase." Ember is used only for the error accent; chestnut for the submit button.
+
 ### Offline preview (mock mode)
 
 There is no standing deployment, so the browse views ship a mock affordance for offline design
@@ -62,6 +85,11 @@ append **`?mock`** to any browse URL at runtime (e.g. `/oracles?mock`). Fixtures
 detail with facts/proposers/AI-claims/market; a bogus `:pubkey?mock` exercises the not-found
 state). Without the flag, the pages always go through `fetchOracles`/`fetchOracleDetail` over
 the live connection.
+
+Mock mode also drives the **write-form states** for design review (a real browser wallet can't
+be scripted): under `?mock`, append `&wallet=connected` for a scripted connected wallet, and
+`&tx=success|error|reject|failconfirm|slow` to script the send/confirm outcome (see
+`src/lib/mockWrite.ts` — swapped in for the real `WalletProvider` only under mock mode).
 
 ## The Delphi design system
 
@@ -86,11 +114,16 @@ for lifted cards); chestnut is the ONLY button fill; flat surfaces + hairline pe
 for display ≥20px, Inter for all body; ≤2 text colors per block; ember/saffron as 1–2
 punctuation moments per viewport.
 
-## Slice 1 (done) vs the next milestone
+## Slice 3 (this milestone) vs next
 
-**Slice 1 (this UI):** the design-system foundation + the landing page — static, composed
-from the primitives. Wallet-adapter and `@kassandra/sdk` deps are present and linked
-(`workspace:*`), but **not wired**: the nav "Connect wallet" pill is a placeholder.
+**Slice 3 (the write flows):** on top of the slice-1 design system + landing (`src/components/`)
+and the slice-2 read layer (`src/data/oracles.ts`, `/oracles` + `/oracles/:pubkey`), the dApp
+now **writes**: a real wallet connect (`AppProviders` → wallet-adapter) plus the three
+wallet-signed forms above (propose / submit-fact / vote-fact), wrapping the pure action layer
+(`src/data/{actions,send,writeAction}.ts`) and sending via `sendTransaction`. Read-only browsing
+still works fully disconnected.
 
-**Next milestone:** the functional dApp — wallet connect + real RPC reads/writes via
-`@kassandra/sdk` (browse oracles/disputes, propose/challenge/vote/settle).
+**Next:** the remaining lifecycle actions (create-oracle, finalize proposals/facts/AI/oracle,
+open/settle challenge, submit AI claim, claim/close/sweep) + a standing devnet deployment — all
+deferred. The app only ever consumes the built `@kassandra/sdk`; programs/runner/SDK-src are
+untouched.
