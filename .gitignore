@@ -16,3 +16,9 @@ dist-ssr/
 docs-site/package-lock.json
 docs-site/export.zip
 docs-site/_site/
+
+# Playwright browser e2e (app/) — funded-wallet secret + run artifacts
+app/e2e/.wallet.json
+app/test-results/
+app/playwright-report/
+app/blob-report/

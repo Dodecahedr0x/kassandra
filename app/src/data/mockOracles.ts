@@ -40,6 +40,20 @@ export function isMockMode(): boolean {
   return false
 }
 
+/**
+ * E2E mode (`VITE_E2E=1` or `?e2e`): swap in the REAL-SIGNING e2e wallet
+ * (`lib/e2eWallet`) driven by a Playwright-injected funded keypair, against the
+ * LIVE cluster connection. Distinct from mock mode — nothing is faked; the write
+ * path signs + sends + confirms on the local validator.
+ */
+export function isE2eMode(): boolean {
+  if (import.meta.env.VITE_E2E === '1') return true
+  if (typeof window !== 'undefined') {
+    return new URLSearchParams(window.location.search).has('e2e')
+  }
+  return false
+}
+
 // A readable stand-in for an Address. Mock display code only ever stringifies
 // these (they are never fed to `new Address(...)` — that path is the live RPC),
 // so a cast is safe and keeps the fixtures legible.

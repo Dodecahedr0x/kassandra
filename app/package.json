@@ -10,6 +10,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:e2e": "KASSANDRA_E2E=1 vitest run",
+    "test:e2e:pw": "playwright test",
     "lint": "oxlint",
     "preview": "vite preview"
   },
@@ -28,6 +29,7 @@
     "react-router-dom": "^7.18.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",

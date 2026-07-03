@@ -7,8 +7,9 @@ import {
 } from '@solana/wallet-adapter-wallets'
 
 import { ClusterProvider } from '../lib/ClusterProvider'
-import { isMockMode } from '../data/mockOracles'
+import { isMockMode, isE2eMode } from '../data/mockOracles'
 import { MockWalletProvider } from '../lib/mockWallet'
+import { E2eWalletProvider } from '../lib/e2eWallet'
 
 // Wallet-adapter base styles are imported + overridden to the Delphi look in
 // index.css (no default purple/dark leaks through — we never render the
@@ -35,11 +36,13 @@ export function AppProviders({ children }: { children: ReactNode }) {
   // automatable browser wallet (see `lib/mockWallet`). Never active live.
   const WalletShell = isMockMode()
     ? ({ children: c }: { children: ReactNode }) => <MockWalletProvider>{c}</MockWalletProvider>
-    : ({ children: c }: { children: ReactNode }) => (
-        <WalletProvider wallets={wallets} autoConnect>
-          {c}
-        </WalletProvider>
-      )
+    : isE2eMode()
+      ? ({ children: c }: { children: ReactNode }) => <E2eWalletProvider>{c}</E2eWalletProvider>
+      : ({ children: c }: { children: ReactNode }) => (
+          <WalletProvider wallets={wallets} autoConnect>
+            {c}
+          </WalletProvider>
+        )
 
   return (
     <ClusterProvider>
