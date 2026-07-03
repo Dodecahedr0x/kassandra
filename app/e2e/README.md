@@ -30,7 +30,8 @@ chain via `onchain.ts`).
 
 ## Coverage
 
-Every action is driven through the real app UI and asserted on-chain.
+Every action is driven through the real app UI and asserted on-chain. The default
+run covers the **entire non-challenge protocol surface — 15 instructions**:
 
 | Instruction | Spec | Status |
 |---|---|---|
@@ -43,26 +44,28 @@ Every action is driven through the real app UI and asserted on-chain.
 | `advancePhase` | cranks.spec | ✅ |
 | `finalizeFacts` | cranks.spec | ✅ |
 | `finalizeAiClaims` | cranks.spec | ✅ |
+| `finalizeOracle` | settle.spec | ✅ |
 | `claimProposer` | writes.spec (claim) | ✅ |
+| `claimFact` | terminal.spec | ✅ |
+| `claimFactVote` | terminal.spec | ✅ |
+| `closeAiClaim` | terminal.spec | ✅ |
+| `sweepOracle` | sweep.spec | ✅ |
 
-### Remaining (harness ready; each is an added seed + spec)
+### Remaining
 
-- **`finalizeOracle`** — needs a Challenge-phase oracle with surviving proposers
-  (drive to AiClaim, submit AI claims for the proposers, `finalizeAiClaims` →
-  Challenge, then crank `finalizeOracle`).
-- **`claimFact` / `claimFactVote` / `closeAiClaim`** — need a disputed oracle
-  driven to a terminal state with the **wallet** as the fact submitter / voter, so
-  the connected wallet has something to claim/close.
-- **`sweepOracle` / `closeMarket`** — need governance fabricated (patch
-  `Protocol.dao_authority`) + the 30-day sweep grace elapsed / a settled Market.
 - **Challenge market cluster** (`openChallenge`, `swap`, `crankTwap`,
-  `settleChallenge`) — needs surfpool **forking mainnet** so MetaDAO's deployed
-  conditional-vault + AMM programs are executable (network-dependent + slower; the
-  same setup the gated vitest `challenge.e2e.test.ts` uses). Run these in a
-  separate, network-gated Playwright project.
-- **Admin/DAO** (`setConfig`, `setGovernance`, `resolveDeadend`, `kassPrice`) — not
-  participant flows; require the DAO authority (governance fabrication) and are
-  covered by the program's LiteSVM tests.
+  `settleChallenge`, `closeMarket`) — requires surfpool **forking mainnet** so
+  MetaDAO's deployed conditional-vault + AMM programs are executable, plus the
+  multi-step market composition (question + 2 conditional vaults + split + 2 AMMs
+  + liquidity) and the slot-timed TWAP crank. The fork works in this environment
+  (the gated vitest `challenge.e2e.test.ts` passes), so this belongs in a
+  **separate, network-gated Playwright project** with a forked (`fork: "mainnet"`,
+  `blockProductionMode: "clock"`) globalSetup — not the fast default simnet run.
+  Its flow is already proven at the app-builder level by that vitest suite.
+- **Admin/DAO** (`setConfig`, `setGovernance`, `resolveDeadend`, `kassPrice`) — the
+  app ships **no UI** for these; per "create it if missing" they'd need admin
+  pages + `build*Ixs` wrappers, and (except `kassPrice`, a read) the DAO authority.
+  They are covered by the program's LiteSVM tests today.
 
 ## Adding a spec
 
