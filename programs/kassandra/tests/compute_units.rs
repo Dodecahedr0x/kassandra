@@ -166,31 +166,8 @@ fn finalize_ai_claims_ix(ctx: &TestCtx, oracle: Pubkey, tail: &[Pubkey]) -> Inst
     }
 }
 
-// ----- per-instruction CU ceilings (measured value + headroom) ---------------
-//
-// Bump a ceiling ONLY for an intentional cost change, noting the new measured
-// number in the commit. A silent regression trips the guard below.
-struct Budget {
-    ix: &'static str,
-    max_cu: u64,
-}
-
-// Ceilings = the measured (deterministic) max CU + ~12% headroom. The test is
-// deterministic (fixed keypairs), so these are stable regression guards.
-const BUDGETS: &[Budget] = &[
-    Budget { ix: "init_protocol", max_cu: 7_000 },      // measured 6_079
-    Budget { ix: "create_oracle", max_cu: 18_000 },     // measured 16_073
-    Budget { ix: "propose", max_cu: 13_000 },           // measured 11_523
-    Budget { ix: "finalize_proposals", max_cu: 1_400 }, // measured 1_092
-    Budget { ix: "submit_fact", max_cu: 13_000 },       // measured 11_518
-    Budget { ix: "advance_phase", max_cu: 800 },        // measured 577
-    Budget { ix: "vote_fact", max_cu: 11_500 },         // measured 10_203
-    Budget { ix: "finalize_facts", max_cu: 3_200 },     // measured 2_733
-    Budget { ix: "submit_ai_claim", max_cu: 6_500 },    // measured 5_621
-    Budget { ix: "finalize_ai_claims", max_cu: 1_800 }, // measured 1_431
-    Budget { ix: "finalize_oracle", max_cu: 7_000 },    // measured 6_015
-    Budget { ix: "claim_proposer", max_cu: 10_000 },    // measured 9_019
-];
+/// Path to the committed golden CU snapshot the metering test compares against.
+const SNAPSHOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/compute_units.snap");
 
 /// Guards the hardcoded `guards::PROTOCOL_PDA` (which `load_protocol` uses to skip
 /// a `find_program_address`) against program-id drift: re-derive it and compare.
@@ -207,7 +184,7 @@ fn protocol_pda_const_matches_derivation() {
 }
 
 #[test]
-fn cu_metering_full_lifecycle_under_budget() {
+fn cu_metering_full_lifecycle_matches_snapshot() {
     let mut ctx = TestCtx::new();
     let bond = 1_000u64;
 
@@ -302,19 +279,26 @@ fn cu_metering_full_lifecycle_under_budget() {
     let claim = ctx.claim_proposer_ix(oracle, nonce, p0, dest0, vault, authorities[0].pubkey());
     ctx.send(claim, &[]).expect("claim_proposer");
 
-    // --- report + guard ------------------------------------------------------
-    print!("{}", ctx.cu_report());
+    // --- compare the EXACT CU report against the committed snapshot -----------
+    // No arbitrary ceilings: the run is deterministic, so we assert the exact
+    // per-instruction CU against a golden file. Any drift — a regression OR an
+    // improvement — fails, forcing an explicit re-bless that records the new
+    // numbers in the diff:  BLESS_CU=1 cargo test -p kassandra-program \
+    //     --test compute_units
+    let report = ctx.cu_report();
+    print!("{report}");
 
-    for b in BUDGETS {
-        let used = ctx
-            .cu_max(b.ix)
-            .unwrap_or_else(|| panic!("instruction `{}` was never metered", b.ix));
-        assert!(
-            used <= b.max_cu,
-            "CU regression: `{}` used {used} CU, over its {} budget — investigate, \
-             or bump the ceiling in BUDGETS with the new number if intentional",
-            b.ix,
-            b.max_cu,
-        );
+    if std::env::var_os("BLESS_CU").is_some() {
+        std::fs::write(SNAPSHOT, &report).expect("write CU snapshot");
+        eprintln!("blessed CU snapshot: {SNAPSHOT}");
+        return;
     }
+    let expected = std::fs::read_to_string(SNAPSHOT).unwrap_or_else(|_| {
+        panic!("missing {SNAPSHOT} — create it with `BLESS_CU=1 cargo test -p kassandra-program --test compute_units`")
+    });
+    assert_eq!(
+        report, expected,
+        "\nCU metering changed vs tests/compute_units.snap (see the report above). \
+         If intended, re-bless: BLESS_CU=1 cargo test -p kassandra-program --test compute_units\n",
+    );
 }
