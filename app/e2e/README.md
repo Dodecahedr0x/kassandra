@@ -17,21 +17,35 @@ perform the UI action, and assert the **persistent on-chain effect** (the UI
 success line is transient — wiped by the post-write refetch, so we verify the
 chain via `onchain.ts`).
 
+There are **two** runs. The **default** (`scripts/e2e-playwright.sh`) is a fast
+local simnet covering the whole non-challenge surface. The **forked** run
+(`scripts/e2e-playwright-fork.sh`) boots surfpool **forking mainnet** (so MetaDAO's
+deployed conditional-vault / AMM / futarchy programs are executable) in `clock`
+block-production mode and drives the whole challenge-market cluster through the
+browser. Each has its own config (`playwright.config.ts` / `playwright.fork.config.ts`),
+port (8899 / 8940), and Vite server (5173 / 5174), so they never collide.
+
 ## Files
 
 - `global-setup.ts` — boot surfpool + seed one oracle per action.
 - `seed.ts` — reusable phase drivers (create → dispute → FactProposal → FactVoting
-  → AiClaim), + `keepWindowOpen` (patches `phase_ends_at` to the far future, since
-  surfpool time-travel is forward-only and a window closed by later seeding can't
-  be re-entered by rewinding the clock).
-- `onchain.ts` — read/decode accounts + a forward clock set.
+  → AiClaim → Challenge), + `keepWindowOpen` (patches `phase_ends_at` to the far
+  future, since surfpool time-travel is forward-only and a window closed by later
+  seeding can't be re-entered by rewinding the clock), + `fabricateKassDao` /
+  `seedDeadendOracle` for the admin ops.
+- `onchain.ts` — read/decode accounts, a forward clock set, and `patchProtocol`
+  (fabricate the governance field an admin op is gated on).
+- `fork/` — the forked challenge-market project (`global-setup.ts`, `onchain.ts`,
+  `challenge.spec.ts`).
 - `e2eWallet.tsx` (in `src/lib`) — the real-signing wallet.
 - `*.spec.ts` — the tests.
 
 ## Coverage
 
-Every action is driven through the real app UI and asserted on-chain. The default
-run covers the **entire non-challenge protocol surface — 15 instructions**:
+Every action is driven through the real app UI and asserted on-chain. Together the
+two runs cover the **entire protocol surface**.
+
+**Default run** — non-challenge surface + the DAO/admin ops:
 
 | Instruction | Spec | Status |
 |---|---|---|
@@ -50,22 +64,32 @@ run covers the **entire non-challenge protocol surface — 15 instructions**:
 | `claimFactVote` | terminal.spec | ✅ |
 | `closeAiClaim` | terminal.spec | ✅ |
 | `sweepOracle` | sweep.spec | ✅ |
+| `setGovernance` | admin.spec | ✅ |
+| `setConfig` | admin.spec | ✅ |
+| `resolveDeadend` | admin.spec | ✅ |
+| `kassPrice` | admin.spec | ✅ |
 
-### Remaining
+The four DAO ops had **no UI** — the `/admin` page + `data/actions/admin.ts` were
+built for them. Each is gated on-chain by `Protocol.admin`/`dao_authority`; a real
+hand-off routes through a Squads vault PDA no test keypair can sign, so the spec
+fabricates the exact governance field per-test via `patchProtocol`.
 
-- **Challenge market cluster** (`openChallenge`, `swap`, `crankTwap`,
-  `settleChallenge`, `closeMarket`) — requires surfpool **forking mainnet** so
-  MetaDAO's deployed conditional-vault + AMM programs are executable, plus the
-  multi-step market composition (question + 2 conditional vaults + split + 2 AMMs
-  + liquidity) and the slot-timed TWAP crank. The fork works in this environment
-  (the gated vitest `challenge.e2e.test.ts` passes), so this belongs in a
-  **separate, network-gated Playwright project** with a forked (`fork: "mainnet"`,
-  `blockProductionMode: "clock"`) globalSetup — not the fast default simnet run.
-  Its flow is already proven at the app-builder level by that vitest suite.
-- **Admin/DAO** (`setConfig`, `setGovernance`, `resolveDeadend`, `kassPrice`) — the
-  app ships **no UI** for these; per "create it if missing" they'd need admin
-  pages + `build*Ixs` wrappers, and (except `kassPrice`, a read) the DAO authority.
-  They are covered by the program's LiteSVM tests today.
+**Forked run** (`scripts/e2e-playwright-fork.sh`) — the challenge-market cluster,
+one serial flow over a Challenge-phase oracle:
+
+| Instruction | Driven via | Status |
+|---|---|---|
+| `openChallenge` | `ChallengeComposeForm` (7-step client-side compose→open) | ✅ |
+| `swap` | `ChallengeTradeControls` · SwapForm (a real fail-pool buy) | ✅ |
+| `crankTwap` | `ChallengeTradeControls` · CrankForm (pass + fail pools) | ✅ |
+| `settleChallenge` | `ChallengeTradeControls` · one-click derive-from-Market settle | ✅ |
+| `closeMarket` | `CloseControl` (after `finalizeOracle` → Resolved) | ✅ |
+
+The compose form now takes the **challenged proposer** (query-param default) so
+`open_challenge` derives the right `ai_claim`/`market` — previously it wrongly
+passed the connected wallet. `fork/onchain.ts` backdates `Market.twap_end` /
+`Oracle.phase_ends_at` so the settle + finalize gates open without waiting the
+real TWAP / challenge windows.
 
 ## Adding a spec
 

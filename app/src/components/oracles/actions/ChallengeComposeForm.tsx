@@ -38,6 +38,20 @@ function parseAddress(raw: string): { value?: string; error?: string } {
   return { value: t }
 }
 
+/** The challenged proposer PDA (open_challenge derives its ai_claim/market); required. */
+function parseProposer(raw: string): { value?: string; error?: string } {
+  const t = raw.trim()
+  if (t === '') return { error: 'The challenged proposer address is required.' }
+  return { value: t }
+}
+
+/** Read a URL query param (the e2e/deep-link default for the proposer / DAO). */
+function useParam(name: string): string {
+  return typeof window === 'undefined'
+    ? ''
+    : (new URLSearchParams(window.location.search).get(name) ?? '')
+}
+
 /** A single step row in the staged-progress checklist. */
 function StepRow({ label, status }: { label: string; status: StepStatus | undefined }) {
   const kind = status?.kind ?? 'pending'
@@ -101,14 +115,17 @@ export function ChallengeComposeForm({
   const seq = useComposeSequence(refetch)
   const [baseRaw, setBaseRaw] = useState('')
   const [quoteRaw, setQuoteRaw] = useState('')
-  const [daoRaw, setDaoRaw] = useState('')
+  const [daoRaw, setDaoRaw] = useState(useParam('kassDao'))
+  const [proposerRaw, setProposerRaw] = useState(useParam('proposer'))
   const [steps, setSteps] = useState<ComposeStep[] | null>(null)
   const [buildError, setBuildError] = useState<string | undefined>()
 
   const base = parseReserve(baseRaw, DEFAULT_BASE_RESERVE)
   const quote = parseReserve(quoteRaw, DEFAULT_QUOTE_RESERVE)
   const dao = parseAddress(daoRaw)
-  const inputInvalid = Boolean(base.error) || Boolean(quote.error) || Boolean(dao.error)
+  const proposer = parseProposer(proposerRaw)
+  const inputInvalid =
+    Boolean(base.error) || Boolean(quote.error) || Boolean(dao.error) || Boolean(proposer.error)
 
   // Labels rendered in the checklist (index-aligned to the built steps, or the
   // canonical order before a build so the checklist is visible up front).
@@ -130,9 +147,9 @@ export function ChallengeComposeForm({
       const { steps: built } = await buildComposeAndOpenChallengeIxs({
         connection,
         oracleNonce: nonce,
-        // In mock mode the proposer/dao aren't derivable to real keys; the mock
-        // sequence skips the real send, so any placeholder is fine.
-        proposer: address,
+        // The CHALLENGED proposer PDA (open_challenge derives its ai_claim/market);
+        // the connected wallet is only the challenger/funder.
+        proposer: proposer.value!,
         challenger: address,
         kassMint: oracle.kassMint,
         usdcMint: oracle.usdcMint,
@@ -142,7 +159,16 @@ export function ChallengeComposeForm({
       })
       return built
     },
-    [oraclePubkey, connection, oracle.kassMint, oracle.usdcMint, dao.value, base.value, quote.value],
+    [
+      oraclePubkey,
+      connection,
+      oracle.kassMint,
+      oracle.usdcMint,
+      proposer.value,
+      dao.value,
+      base.value,
+      quote.value,
+    ],
   )
 
   const onSubmit = async (e: FormEvent) => {
@@ -223,6 +249,21 @@ export function ChallengeComposeForm({
               )}
             </Field>
           </div>
+
+          <Field
+            label="Challenged proposer"
+            hint="The Proposer PDA whose AI claim you're challenging (open_challenge derives its market)."
+            error={proposer.error && proposerRaw !== '' ? proposer.error : undefined}
+          >
+            {(ids) => (
+              <TextInput
+                ids={ids}
+                placeholder="Proposer PDA (base58)"
+                value={proposerRaw}
+                onChange={(e) => setProposerRaw(e.target.value)}
+              />
+            )}
+          </Field>
 
           <Field
             label="KASS DAO address"

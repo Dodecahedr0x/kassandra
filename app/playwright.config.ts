@@ -13,6 +13,9 @@ import { defineConfig, devices } from '@playwright/test'
  */
 export default defineConfig({
   testDir: './e2e',
+  // The forked challenge-market project has its own config (playwright.fork.config.ts) —
+  // it boots a mainnet-forking surfpool on a different port; keep it out of this run.
+  testIgnore: '**/fork/**',
   timeout: 120_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,

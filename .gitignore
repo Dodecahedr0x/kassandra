@@ -19,6 +19,7 @@ docs-site/_site/
 
 # Playwright browser e2e (app/) — funded-wallet secret + run artifacts
 app/e2e/.wallet.json
+app/e2e/fork/.wallet.json
 app/test-results/
 app/playwright-report/
 app/blob-report/

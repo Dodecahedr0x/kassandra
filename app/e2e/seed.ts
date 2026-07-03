@@ -40,8 +40,11 @@ async function sha256(s: string): Promise<Uint8Array> {
 }
 
 /** Boot surfpool, deploy the program, mint KASS/USDC, and init the protocol. */
-export async function bootAndInit(port: number): Promise<SeedCtx> {
-  const harness = await SurfpoolHarness.start({ port })
+export async function bootAndInit(
+  port: number,
+  harnessOpts: Record<string, unknown> = {},
+): Promise<SeedCtx> {
+  const harness = await SurfpoolHarness.start({ port, ...harnessOpts })
   const payer = await Keypair.generate()
   await harness.airdrop(payer.publicKey.toString(), 1_000_000_000_000)
 
