@@ -163,6 +163,77 @@ export async function keepWindowOpen(ctx: SeedCtx, oracle: Address): Promise<voi
   })
 }
 
+/**
+ * Fabricate DAO governance: patch the Protocol singleton so `governance_set = 1`
+ * and `dao_authority = daoAuthority` (offsets 121 / 128), and create the DAO
+ * treasury (`ATA(daoAuthority, kass_mint)`) as an empty KASS token account. The
+ * real set_governance is hardened (dao_authority must equal a Squads vault PDA no
+ * keypair can sign), so tests fabricate the linkage directly — exactly as the
+ * gated `claims.e2e` surfpool test documents.
+ */
+export async function fabricateGovernance(ctx: SeedCtx, daoAuthority: string): Promise<void> {
+  const { KASSANDRA_PROGRAM_ID, associatedTokenAccount } = await import('@kassandra/sdk')
+  const p = (await pda.protocol()).address
+  const info = await ctx.harness.connection.getAccountInfo(p)
+  if (!info) throw new Error('protocol not found')
+  const data = Uint8Array.from(info.data as Uint8Array)
+  data[121] = 1 // governance_set
+  data.set(new Address(daoAuthority).toBytes(), 128) // dao_authority
+  await ctx.harness.setAccount(p.toString(), {
+    lamports: Number((info as { lamports?: bigint | number }).lamports ?? 5_000_000),
+    owner: KASSANDRA_PROGRAM_ID.toString(),
+    executable: false,
+    data: toHex(data),
+  })
+  // DAO treasury = ATA(dao_authority, kass_mint), empty.
+  const treasury = (await associatedTokenAccount(daoAuthority, ctx.kassMint.publicKey.toString()))
+    .address
+  await ctx.harness.setAccount(treasury.toString(), {
+    lamports: 5_000_000,
+    owner: TOKEN_PROGRAM_ID.toString(),
+    executable: false,
+    data: toHex(
+      tokenAccountBytes(ctx.kassMint.publicKey.toBytes(), new Address(daoAuthority).toBytes(), 0n),
+    ),
+  })
+}
+
+/**
+ * Back-date an oracle's `phase_ends_at` (offset 144) to ~40 days in the PAST
+ * (real time), so the sweep's 30-day grace is elapsed for BOTH the browser gate
+ * (SweepControl compares `Date.now()` against `phase_ends_at + grace`) and the
+ * program gate (the surfpool clock is well past a real-time-past timestamp).
+ */
+export async function backdateForSweep(ctx: SeedCtx, oracle: Address): Promise<void> {
+  const { KASSANDRA_PROGRAM_ID } = await import('@kassandra/sdk')
+  const info = await ctx.harness.connection.getAccountInfo(oracle)
+  if (!info) throw new Error('oracle not found for backdate')
+  const data = Uint8Array.from(info.data as Uint8Array)
+  const past = BigInt(Math.floor(Date.now() / 1000) - 40 * 24 * 3600)
+  new DataView(data.buffer).setBigInt64(144, past, true)
+  await ctx.harness.setAccount(oracle.toString(), {
+    lamports: Number((info as { lamports?: bigint | number }).lamports ?? 5_000_000),
+    owner: KASSANDRA_PROGRAM_ID.toString(),
+    executable: false,
+    data: toHex(data),
+  })
+}
+
+/** Resolve an oracle uncontested (all proposers agree) → Resolved(option). */
+export async function driveToResolvedUncontested(
+  ctx: SeedCtx,
+  oracle: Address,
+  option: number,
+): Promise<void> {
+  await openProposals(ctx, oracle)
+  const p: string[] = []
+  for (let i = 0; i < 3; i++) {
+    p.push((await proposeAs(ctx, oracle, await Keypair.generate(), option, 5_000n)).toString())
+  }
+  await advancePastPhaseEnd(ctx, oracle)
+  await sendIx(ctx, await finalizeProposals({ oracle: oracle.toString(), proposers: p }))
+}
+
 export async function openProposals(ctx: SeedCtx, oracle: Address): Promise<void> {
   const o = decodeOracle(await fetchAccount(ctx, oracle))
   await ctx.harness.advanceToUnix(o.deadline + 60n)

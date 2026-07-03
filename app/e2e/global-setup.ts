@@ -26,11 +26,14 @@ import {
   advanceToFactVoting,
   advancePastPhaseEnd,
   approveVote,
+  backdateForSweep,
   bootAndInit,
   createOracleReal,
   driveToChallengeSurviving,
   driveToFactProposal,
   driveToResolvedFull,
+  driveToResolvedUncontested,
+  fabricateGovernance,
   keepWindowOpen,
   openProposals,
   proposeAs,
@@ -173,6 +176,16 @@ async function globalSetup(): Promise<() => Promise<void>> {
       factVote: r.factVote.toString(),
       aiClaim: r.aiClaim.toString(),
     }
+  }
+
+  // 12) Resolved + governance fabricated + back-dated past the 30-day grace —
+  //     any wallet permissionlessly sweeps the residual dust and closes it.
+  {
+    const o = await createOracleReal(ctx, 12n, 2, 'E2E sweep')
+    await driveToResolvedUncontested(ctx, o, 0)
+    await fabricateGovernance(ctx, ctx.payer.publicKey.toString())
+    await backdateForSweep(ctx, o)
+    oracles.sweepReady = { nonce: '12', address: o.toString() }
   }
 
   writeFileSync(
