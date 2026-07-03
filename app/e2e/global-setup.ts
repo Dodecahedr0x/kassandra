@@ -28,7 +28,9 @@ import {
   approveVote,
   bootAndInit,
   createOracleReal,
+  driveToChallengeSurviving,
   driveToFactProposal,
+  driveToResolvedFull,
   keepWindowOpen,
   openProposals,
   proposeAs,
@@ -148,6 +150,29 @@ async function globalSetup(): Promise<() => Promise<void>> {
     await approveVote(ctx, o, fact)
     await advanceToAiClaim(ctx, o, 9n, fact)
     oracles.aiClaimCrank = { nonce: '9', address: o.toString() }
+  }
+
+  // 10) Challenge phase (wallet survived), window will elapse — wallet cranks
+  //     finalize_oracle into the terminal state.
+  {
+    const o = await createOracleReal(ctx, 10n, 2, 'E2E finalizeOracle crank')
+    await driveToChallengeSurviving(ctx, o, 10n, wallet)
+    oracles.challengeElapsed = { nonce: '10', address: o.toString() }
+  }
+
+  // 11) Fully Resolved with the WALLET in every claimable role — it claims its
+  //     proposer / fact / fact-vote payouts and closes its AI claim.
+  {
+    const o = await createOracleReal(ctx, 11n, 2, 'E2E terminal claims')
+    const r = await driveToResolvedFull(ctx, o, 11n, wallet)
+    oracles.resolvedFull = {
+      nonce: '11',
+      address: o.toString(),
+      proposer: r.proposer.toString(),
+      fact: r.fact.toString(),
+      factVote: r.factVote.toString(),
+      aiClaim: r.aiClaim.toString(),
+    }
   }
 
   writeFileSync(

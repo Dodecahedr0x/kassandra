@@ -279,6 +279,129 @@ export async function advanceToChallenge(ctx: SeedCtx, oracle: Address, proposer
   await sendIx(ctx, await finalizeAiClaims({ oracle: oracle.toString(), proposers: proposers.map(String) }))
 }
 
+/**
+ * Drive an oracle all the way to the Challenge phase with `wallet` surviving:
+ * dispute (wallet = proposer 0) → a fact → FactVoting → approve → AiClaim →
+ * the wallet stamps its AI claim (so it is NOT slashed) → finalize_ai_claims →
+ * Challenge (open_challenge_count == 0). Returns the wallet's Proposer PDA + the
+ * fact + the wallet's AiClaim PDA.
+ */
+export async function driveToChallengeSurviving(
+  ctx: SeedCtx,
+  oracle: Address,
+  nonce: bigint,
+  wallet: Keypair,
+): Promise<{ proposers: Address[]; fact: Address; aiClaim: Address }> {
+  const proposers = await driveToFactProposal(ctx, oracle, wallet)
+  const fact = await submitOneFact(ctx, oracle)
+  await advanceToFactVoting(ctx, oracle)
+  await approveVote(ctx, oracle, fact)
+  await advanceToAiClaim(ctx, oracle, nonce, fact)
+  await submitAiClaimAs(ctx, oracle, proposers[0], wallet, 0)
+  await advanceToChallenge(ctx, oracle, proposers)
+  const aiClaim = (await pda.aiClaim(oracle.toString(), proposers[0].toString())).address
+  return { proposers, fact, aiClaim }
+}
+
+/** Finalize a Challenge-phase oracle (no open challenges) → terminal (Resolved). */
+export async function finalizeToTerminal(
+  ctx: SeedCtx,
+  oracle: Address,
+  nonce: bigint,
+  proposers: Address[],
+): Promise<void> {
+  const { finalizeOracle } = await import('@kassandra/sdk')
+  await advancePastPhaseEnd(ctx, oracle)
+  await sendIx(
+    ctx,
+    await finalizeOracle({
+      nonce,
+      kassMint: ctx.kassMint.publicKey.toString(),
+      proposers: proposers.map(String),
+    }),
+  )
+}
+
+/** Submit a fact as a SPECIFIC keypair (e.g. the browser wallet). Returns the Fact PDA. */
+export async function submitFactAs(
+  ctx: SeedCtx,
+  oracle: Address,
+  submitter: Keypair,
+  stake: bigint,
+): Promise<Address> {
+  const contentHash = new Uint8Array(32).fill(0x5a)
+  await ctx.harness.airdrop(submitter.publicKey.toString(), 2_000_000_000)
+  const submitterKass = await fundKass(ctx, submitter.publicKey.toString(), stake * 10n)
+  await sendIx(
+    ctx,
+    await submitFact({
+      oracle: oracle.toString(),
+      submitter: submitter.publicKey.toString(),
+      submitterKass,
+      contentHash,
+      stake,
+      uri: 'ipfs://wallet-fact',
+    }),
+    [submitter],
+  )
+  return (await pda.fact(oracle.toString(), contentHash)).address
+}
+
+/** Approve-vote a fact as a SPECIFIC keypair (e.g. the browser wallet). */
+export async function voteFactAs(
+  ctx: SeedCtx,
+  oracle: Address,
+  fact: Address,
+  voter: Keypair,
+  stake: bigint,
+): Promise<void> {
+  await ctx.harness.airdrop(voter.publicKey.toString(), 2_000_000_000)
+  const voterKass = await fundKass(ctx, voter.publicKey.toString(), stake * 10n)
+  await sendIx(
+    ctx,
+    await voteFact({
+      oracle: oracle.toString(),
+      fact: fact.toString(),
+      voter: voter.publicKey.toString(),
+      voterKass,
+      kind: VOTE_APPROVE,
+      stake,
+    }),
+    [voter],
+  )
+}
+
+/**
+ * Drive an oracle all the way to Resolved with `wallet` in EVERY claimable role:
+ * winning proposer (option 0), agreed-fact submitter, approve-voter, and AI
+ * claimant. The second proposer (option 1) submits no AI claim, so it is slashed
+ * and the wallet's option resolves. Returns the wallet's claimable child PDAs.
+ */
+export async function driveToResolvedFull(
+  ctx: SeedCtx,
+  oracle: Address,
+  nonce: bigint,
+  wallet: Keypair,
+): Promise<{ proposer: Address; fact: Address; factVote: Address; aiClaim: Address }> {
+  await openProposals(ctx, oracle)
+  const walletProposer = await proposeAs(ctx, oracle, wallet, 0, 5_000n)
+  const other = await proposeAs(ctx, oracle, await Keypair.generate(), 1, 1_000n)
+  await advancePastPhaseEnd(ctx, oracle)
+  await sendIx(ctx, await finalizeProposals({ oracle: oracle.toString(), proposers: [walletProposer.toString(), other.toString()] }))
+
+  const fact = await submitFactAs(ctx, oracle, wallet, 2_000n)
+  await advanceToFactVoting(ctx, oracle)
+  await voteFactAs(ctx, oracle, fact, wallet, 8_000n) // clears quorum vs the 6000 bond weight
+  await advanceToAiClaim(ctx, oracle, nonce, fact)
+  await submitAiClaimAs(ctx, oracle, walletProposer, wallet, 0)
+  await advanceToChallenge(ctx, oracle, [walletProposer, other])
+  await finalizeToTerminal(ctx, oracle, nonce, [walletProposer, other])
+
+  const factVote = (await pda.factVote(fact.toString(), wallet.publicKey.toString())).address
+  const aiClaim = (await pda.aiClaim(oracle.toString(), walletProposer.toString())).address
+  return { proposer: walletProposer, fact, factVote, aiClaim }
+}
+
 /** Submit a (fabricated-metadata) AI claim as `authority` for its `proposer`. */
 export async function submitAiClaimAs(
   ctx: SeedCtx,
