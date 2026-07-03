@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react'
 import type { Oracle } from '@kassandra/sdk'
-import { pda } from '@kassandra/sdk'
 import { Card } from '../../ui'
 import { buildSubmitAiClaimIxs } from '../../../data/actions/challenge'
 import { useWriteAction } from '../../../hooks/useWriteAction'
@@ -99,19 +98,17 @@ export function SubmitAiClaimForm({
     setErrors(next)
     if (Object.keys(next).length > 0) return
 
-    void action.run(async () => {
-      const proposer = (await pda.proposer(pubkey, action.address!)).address
-      return buildSubmitAiClaimIxs({
+    void action.run(async () =>
+      buildSubmitAiClaimIxs({
         oracle: pubkey,
-        proposer,
         submitter: action.address!,
         modelId: model.value!,
         paramsHash: params.value!,
         ioHash: io.value!,
         option: optNum,
         optionsCount: oracle.optionsCount,
-      })
-    })
+      }),
+    )
   }
 
   const radioClass = (active: boolean) =>

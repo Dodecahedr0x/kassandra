@@ -42,6 +42,8 @@ import {
   claimProposer,
   closeAiClaim,
   closeMarket,
+  decodeProtocol,
+  pda,
   sweepOracle,
 } from "@kassandra/sdk";
 import { ValidationError, type AddressInput } from "../actions";
@@ -277,6 +279,28 @@ export interface BuildSweepOracleArgs {
   /** Rent recipient for both reclaimed rents (`== oracle.creator`). */
   creator: AddressInput;
   programId?: Address;
+}
+
+/**
+ * Resolve the DAO treasury owner (`Protocol.dao_authority`) from the on-chain
+ * Protocol singleton — the sweep target owner. Encapsulates the protocol PDA
+ * derivation + decode so callers (e.g. the sweep control) don't reach into the
+ * SDK's `pda` / `decodeProtocol` directly. Throws a clear error if the protocol
+ * account is missing or governance has not been linked yet.
+ */
+export async function resolveDaoAuthority(conn: Connection): Promise<Address> {
+  const protocolPda = (await pda.protocol()).address;
+  const info = await conn.getAccountInfo(protocolPda);
+  if (!info || info.data.length === 0) {
+    throw new Error(
+      "Protocol account not found — governance is not initialized on this cluster.",
+    );
+  }
+  const protocol = decodeProtocol(info.data);
+  if (!protocol.governanceSet) {
+    throw new Error("Governance is not set yet — the DAO treasury sweep is unavailable.");
+  }
+  return protocol.daoAuthority;
 }
 
 export async function buildSweepOracleIxs(

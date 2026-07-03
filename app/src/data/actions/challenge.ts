@@ -31,7 +31,7 @@
  * caller already composed, and submit_ai_claim only writes the claim PDA.
  */
 import { Address, type TransactionInstruction } from "@solana/web3.js";
-import { openChallenge, settleChallenge, submitAiClaim } from "@kassandra/sdk";
+import { openChallenge, pda, settleChallenge, submitAiClaim } from "@kassandra/sdk";
 import { ValidationError, type AddressInput } from "../actions";
 
 /** Coerce an {@link AddressInput} into an `Address`, re-typing a parse failure as a field error. */
@@ -233,8 +233,12 @@ export async function buildSettleChallengeIxs(
 export interface BuildSubmitAiClaimArgs {
   /** The oracle (must be in the AiClaim phase). */
   oracle: AddressInput;
-  /** The submitter's Proposer PDA (`proposer.authority == submitter`). */
-  proposer: AddressInput;
+  /**
+   * The submitter's Proposer PDA (`proposer.authority == submitter`). Optional —
+   * when omitted it is derived from `[b"proposer", oracle, submitter]`, so
+   * callers need only pass the oracle + submitter.
+   */
+  proposer?: AddressInput;
   /** Proposer authority (signer): pays the AiClaim rent. */
   submitter: AddressInput;
   /** 32-byte pinned model id (runner-produced). */
@@ -257,10 +261,15 @@ export async function buildSubmitAiClaimIxs(
   const paramsHash = requireBytes32("paramsHash", args.paramsHash);
   const ioHash = requireBytes32("ioHash", args.ioHash);
   const option = requireOption(args.option, args.optionsCount);
+  const oracle = addr("oracle", args.oracle);
+  const submitter = addr("submitter", args.submitter);
+  const proposer = args.proposer
+    ? addr("proposer", args.proposer)
+    : (await pda.proposer(oracle, submitter)).address;
   const ix = await submitAiClaim({
-    oracle: addr("oracle", args.oracle),
-    proposer: addr("proposer", args.proposer),
-    authority: addr("submitter", args.submitter),
+    oracle,
+    proposer,
+    authority: submitter,
     modelId,
     paramsHash,
     ioHash,

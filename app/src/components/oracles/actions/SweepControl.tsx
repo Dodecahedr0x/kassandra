@@ -1,11 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import type { Oracle } from '@kassandra/sdk'
-import { decodeProtocol, pda } from '@kassandra/sdk'
 import { Card } from '../../ui'
 import { relativeDeadline } from '../../../lib/oracleView'
 import { recallNonce } from '../../../lib/nonceStore'
 import { resolveOracleNonce } from '../../../data/actions/finalize'
-import { buildSweepOracleIxs } from '../../../data/actions/claims'
+import { buildSweepOracleIxs, resolveDaoAuthority } from '../../../data/actions/claims'
 import { useWriteAction } from '../../../hooks/useWriteAction'
 import { ConnectGate } from './ConnectGate'
 import { SubmitButton } from './formPrimitives'
@@ -51,18 +50,11 @@ export function SweepControl({
       const conn = action.connection
       const nonce = recallNonce(oracle) ?? (await resolveOracleNonce(oracle))
       // The DAO authority (treasury owner) lives on the Protocol singleton.
-      const protoInfo = await conn.getAccountInfo((await pda.protocol()).address)
-      if (!protoInfo || protoInfo.data.length === 0) {
-        throw new Error('Protocol account not found — governance is not initialized on this cluster.')
-      }
-      const protocol = decodeProtocol(protoInfo.data)
-      if (!protocol.governanceSet) {
-        throw new Error('Governance is not set yet — the DAO treasury sweep is unavailable.')
-      }
+      const daoAuthority = await resolveDaoAuthority(conn)
       return buildSweepOracleIxs({
         oracleNonce: nonce,
         kassMint: oracleAccount.kassMint,
-        daoAuthority: protocol.daoAuthority,
+        daoAuthority,
         creator: oracleAccount.creator,
       })
     })
