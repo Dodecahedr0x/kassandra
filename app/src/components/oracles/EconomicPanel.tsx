@@ -112,7 +112,7 @@ export function EconomicPanel({
                 label={o.option === leadingOption ? `Option ${o.option} · leading` : `Option ${o.option}`}
                 value={o.bond}
                 width={pct(o.bond, optionMax)}
-                fill={o.option === leadingOption ? 'bg-chestnut' : 'bg-pebble'}
+                fill={o.option === leadingOption ? 'bg-cyan-phosphor' : 'bg-pebble'}
               />
             ))
           ) : (

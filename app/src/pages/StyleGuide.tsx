@@ -8,23 +8,28 @@ import {
   TriggerPreviewCard,
 } from '../components/ui'
 
-/** Every Delphi color token: name + hex, in @theme order. */
+/**
+ * Every color token: legacy (Delphi) name + its ACTUAL Auros @theme value, in
+ * @theme order. The names are preserved so components re-skin without edits; the
+ * hexes below mirror the live values in `index.css` (danger = coral ember-orange,
+ * positive = aqua chestnut). `dark` = the swatch is dark, so label text goes light.
+ */
 const COLORS: { name: string; token: string; hex: string; dark?: boolean }[] = [
-  { name: 'parchment', token: 'bg-parchment', hex: '#fdf6ee' },
-  { name: 'soft-cream', token: 'bg-soft-cream', hex: '#f0e6dc' },
-  { name: 'pure-card', token: 'bg-pure-card', hex: '#ffffff' },
-  { name: 'ink-black', token: 'bg-ink-black', hex: '#000000', dark: true },
-  { name: 'charcoal-bark', token: 'bg-charcoal-bark', hex: '#21201c', dark: true },
-  { name: 'sepia', token: 'bg-sepia', hex: '#2b180a', dark: true },
-  { name: 'bronze', token: 'bg-bronze', hex: '#7f6e60', dark: true },
-  { name: 'driftwood', token: 'bg-driftwood', hex: '#94877c', dark: true },
-  { name: 'stone', token: 'bg-stone', hex: '#a99d93', dark: true },
-  { name: 'pebble', token: 'bg-pebble', hex: '#d9cfc3' },
-  { name: 'chestnut', token: 'bg-chestnut', hex: '#3e2407', dark: true },
-  { name: 'ember-orange', token: 'bg-ember-orange', hex: '#f65726', dark: true },
-  { name: 'saffron-pulse', token: 'bg-saffron-pulse', hex: '#ff5c00', dark: true },
-  { name: 'peach-glow', token: 'bg-peach-glow', hex: '#fed0b3' },
-  { name: 'cobalt', token: 'bg-cobalt', hex: '#1da1f2', dark: true },
+  { name: 'parchment', token: 'bg-parchment', hex: '#012624', dark: true },
+  { name: 'soft-cream', token: 'bg-soft-cream', hex: '#011d1c', dark: true },
+  { name: 'pure-card', token: 'bg-pure-card', hex: '#003734', dark: true },
+  { name: 'ink-black', token: 'bg-ink-black', hex: '#011d1c', dark: true },
+  { name: 'charcoal-bark', token: 'bg-charcoal-bark', hex: '#edfffe' },
+  { name: 'sepia', token: 'bg-sepia', hex: '#ffffff' },
+  { name: 'bronze', token: 'bg-bronze', hex: '#bbc7c6' },
+  { name: 'driftwood', token: 'bg-driftwood', hex: '#bbc7c6' },
+  { name: 'stone', token: 'bg-stone', hex: '#8fa3a1' },
+  { name: 'pebble', token: 'bg-pebble', hex: 'rgba(255,255,255,0.1)', dark: true },
+  { name: 'chestnut', token: 'bg-chestnut', hex: '#8fe9dd' },
+  { name: 'ember-orange', token: 'bg-ember-orange', hex: '#ff6f61' },
+  { name: 'saffron-pulse', token: 'bg-saffron-pulse', hex: '#cbfffc' },
+  { name: 'peach-glow', token: 'bg-peach-glow', hex: '#003734', dark: true },
+  { name: 'cobalt', token: 'bg-cobalt', hex: '#cbfffc' },
 ]
 
 /** Type-scale roles. Serif is used ONLY for display >= 20px (subheading and up). */
@@ -54,8 +59,8 @@ export default function StyleGuide() {
         <EyebrowTag pill>Design System · U1</EyebrowTag>
         <h1 className="mt-4 font-serif text-display font-light text-sepia">Kassandra</h1>
         <p className="mx-auto mt-3 max-w-[560px] font-inter text-[17px] text-bronze">
-          The Delphi visual language — warm parchment editorial with ember sparks. A living
-          gallery of tokens and primitives.
+          The Auros visual language — an abyssal-teal terminal with bioluminescent data accents,
+          coral reserved for danger. A living gallery of tokens and primitives.
         </p>
       </header>
 
@@ -106,8 +111,10 @@ export default function StyleGuide() {
           </Button>
         </div>
         <p className="mt-4 font-inter text-[13px] text-driftwood">
-          PrimaryChestnut carries the signature peach <code className="font-mono">#fed0b3</code>{' '}
-          bloom box-shadow — a warm glow radiating behind the fill, not a neutral drop shadow.
+          The primary action is a lifted-teal fill with a{' '}
+          <code className="font-mono">cyan-phosphor</code> hairline — distinct from the kelp card
+          surface it sits on (depth is surface color, not shadow). Connect is the signature aurora
+          gradient pill.
         </p>
       </Panel>
 

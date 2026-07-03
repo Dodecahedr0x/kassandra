@@ -38,7 +38,7 @@ function BackLink({ search }: { search: string }) {
   return (
     <Link
       to={{ pathname: '/oracles', search }}
-      className="inline-block font-inter text-[14px] text-sepia underline decoration-pebble underline-offset-4 hover:text-ember-orange focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sepia/40 focus-visible:ring-offset-2 focus-visible:ring-offset-parchment"
+      className="inline-block font-inter text-[14px] text-sepia underline decoration-pebble underline-offset-4 hover:text-lavender-phosphor focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sepia/40 focus-visible:ring-offset-2 focus-visible:ring-offset-parchment"
     >
       ← All oracles
     </Link>

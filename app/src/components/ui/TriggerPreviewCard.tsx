@@ -35,7 +35,7 @@ export function TriggerPreviewCard({
         {variable ? (
           <>
             {' '}
-            <span className="font-mono text-ember-orange">{variable}</span>
+            <span className="font-mono text-lavender-phosphor">{variable}</span>
           </>
         ) : null}
       </p>

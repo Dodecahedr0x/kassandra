@@ -52,7 +52,7 @@ export function DashboardStats({ stats }: { stats: OracleStats }) {
           <span className="font-inter text-[12px] uppercase tracking-wide text-driftwood">
             Bonds &amp; stake at risk
           </span>
-          <span className="font-serif text-heading font-light leading-none text-ember-orange">
+          <span className="font-serif text-heading font-light leading-none text-lavender-phosphor">
             {groupDigits(stats.bondsAtRisk)}
           </span>
           <span className="font-inter text-[12px] text-bronze">

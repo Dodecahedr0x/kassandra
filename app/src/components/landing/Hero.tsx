@@ -26,7 +26,7 @@ const CARDS: QuestionCardData[] = [
     question: 'Did protocol X ship mainnet by Jun 30?',
     verdict: (
       <>
-        Proposed: <span className="text-ember-orange">Yes</span> · bond posted
+        Proposed: <span className="text-lavender-phosphor">Yes</span> · bond posted
       </>
     ),
     pos: 'lg:top-[24px] lg:left-0',
@@ -38,7 +38,7 @@ const CARDS: QuestionCardData[] = [
     question: 'Rerunning the pinned model over the agreed facts.',
     verdict: (
       <>
-        Confidence <span className="text-ember-orange">96%</span> · hash committed
+        Confidence <span className="text-lavender-phosphor">96%</span> · hash committed
       </>
     ),
     pos: 'lg:top-[8px] lg:right-[16px]',
@@ -56,7 +56,7 @@ const CARDS: QuestionCardData[] = [
     question: 'Backed the honest side of the market.',
     verdict: (
       <>
-        Settlement <span className="text-ember-orange">+2.4%</span>
+        Settlement <span className="text-lavender-phosphor">+2.4%</span>
       </>
     ),
     pos: 'lg:top-[300px] lg:right-0',
@@ -74,7 +74,7 @@ const CARDS: QuestionCardData[] = [
     question: 'Verdict committed over the agreed facts.',
     verdict: (
       <>
-        Resolved: <span className="text-ember-orange">No</span>
+        Resolved: <span className="text-lavender-phosphor">No</span>
       </>
     ),
     pos: 'lg:bottom-[28px] lg:right-[120px]',

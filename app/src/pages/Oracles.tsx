@@ -165,7 +165,7 @@ export default function Oracles() {
       <div className="mt-8 flex justify-center">
         <Link
           to={{ pathname: '/oracles/new', search }}
-          className="inline-flex items-center justify-center gap-2 rounded-button bg-chestnut px-4 py-2.5 font-inter text-body font-medium text-white shadow-bloom transition-all duration-150 hover:-translate-y-px hover:bg-sepia focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-peach-glow focus-visible:ring-offset-2 focus-visible:ring-offset-parchment"
+          className="inline-flex items-center justify-center gap-2 rounded-button bg-chestnut px-4 py-2.5 font-inter text-body font-medium text-liquid-abyss transition-all duration-150 hover:-translate-y-px hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-phosphor focus-visible:ring-offset-2 focus-visible:ring-offset-liquid-abyss"
         >
           Create oracle
         </Link>

@@ -19,10 +19,12 @@ const base =
   'focus-visible:ring-offset-liquid-abyss disabled:opacity-50 disabled:cursor-not-allowed'
 
 const variants: Record<ButtonVariant, string> = {
-  // Filled Liquid Kelp action, platinum text. The primary form action.
+  // Filled lifted-teal action with a cyan hairline, platinum text. The primary
+  // form action — a rest fill DISTINCT from the kelp card surface it sits on (a
+  // flat kelp button on a kelp card is invisible), brightening on hover.
   PrimaryChestnut:
-    'bg-liquid-kelp text-platinum px-4 py-2.5 ' +
-    'hover:bg-[#04524c] focus-visible:ring-cyan-phosphor',
+    'bg-[#05564f] text-platinum px-4 py-2.5 border border-cyan-phosphor/30 ' +
+    'hover:bg-[#076b61] hover:border-cyan-phosphor/50 focus-visible:ring-cyan-phosphor',
   // Transparent, 1px hairline, platinum text. No bg/shadow.
   GhostOutline:
     'bg-transparent text-platinum border border-pebble px-4 py-2.5 ' +

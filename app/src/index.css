@@ -36,8 +36,8 @@
   --color-driftwood: #bbc7c6; /* muted body -> silver-mist */
   --color-stone: #8fa3a1; /* lighter muted -> teal-gray */
   --color-pebble: rgba(255, 255, 255, 0.1); /* hairline borders on dark */
-  --color-chestnut: #003734; /* hover/dark accent -> kelp */
-  --color-ember-orange: #fde9ff; /* accent/highlight -> lavender-phosphor */
+  --color-chestnut: #8fe9dd; /* positive/confirmed/active accent -> bright aqua (success lines, confirmed chips, active toggles, current step). MUST stay distinct from the kelp card surface. */
+  --color-ember-orange: #ff6f61; /* error/danger signal -> living coral (alerts, invalid inputs, disqualify verdicts, high-impact warnings) */
   --color-saffron-pulse: #cbfffc; /* secondary accent -> cyan */
   --color-peach-glow: #003734; /* soft accent bg -> kelp */
   --color-cobalt: #cbfffc; /* the verified dot -> cyan (no blue) */
