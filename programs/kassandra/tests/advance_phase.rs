@@ -11,24 +11,15 @@
 mod common;
 use common::*;
 
-use kassandra_program::{error::KassandraError, instruction::Ix, state::Phase};
+use kassandra_program::{error::KassandraError, state::Phase};
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction, InstructionError},
+    instruction::InstructionError,
     pubkey::Pubkey,
     transaction::TransactionError,
 };
 
 /// PHASE_WINDOW mirrored from the program config (`src/config.rs`).
 const PHASE_WINDOW: i64 = 3600;
-
-/// Build the permissionless `advance_phase` instruction.
-fn advance_phase_ix(ctx: &TestCtx, oracle: Pubkey) -> Instruction {
-    Instruction {
-        program_id: ctx.program_id,
-        accounts: vec![AccountMeta::new(oracle, false)],
-        data: vec![Ix::AdvancePhase as u8],
-    }
-}
 
 /// Seed an oracle in `FactProposal`.
 fn seed() -> (TestCtx, Pubkey) {

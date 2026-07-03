@@ -19,17 +19,13 @@ use common::*;
 
 use kassandra_program::{
     config::{PHASE_WINDOW, PROPOSAL_WINDOW},
-    instruction::Ix,
     state::{Phase, VOTE_APPROVE},
 };
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     signer::keypair::keypair_from_seed,
-    system_program,
 };
-use spl_token::ID as TOKEN_PROGRAM_ID;
 
 /// A DETERMINISTIC keypair from a fixed 32-byte seed. Using fixed keys makes the
 /// derived PDAs (proposer / fact-vote / ai-claim) — and therefore the
@@ -41,129 +37,8 @@ fn kp(seed: u8) -> Keypair {
 
 // ----- dispute-core instruction builders (mirror lifecycle_e2e.rs) -----------
 
-fn submit_fact_payload(content_hash: &[u8; 32], stake: u64, uri: &[u8]) -> Vec<u8> {
-    let mut data = Vec::with_capacity(1 + 32 + 8 + 2 + uri.len());
-    data.push(Ix::SubmitFact as u8);
-    data.extend_from_slice(content_hash);
-    data.extend_from_slice(&stake.to_le_bytes());
-    data.extend_from_slice(&(uri.len() as u16).to_le_bytes());
-    data.extend_from_slice(uri);
-    data
-}
-
-fn submit_fact_ix(
-    ctx: &TestCtx,
-    oracle: Pubkey,
-    fact: Pubkey,
-    submitter: Pubkey,
-    submitter_kass: Pubkey,
-    vault: Pubkey,
-    data: Vec<u8>,
-) -> Instruction {
-    Instruction {
-        program_id: ctx.program_id,
-        accounts: vec![
-            AccountMeta::new(oracle, false),
-            AccountMeta::new(fact, false),
-            AccountMeta::new(submitter, true),
-            AccountMeta::new(submitter_kass, false),
-            AccountMeta::new(vault, false),
-            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
-            AccountMeta::new_readonly(system_program::id(), false),
-        ],
-        data,
-    }
-}
-
-fn advance_phase_ix(ctx: &TestCtx, oracle: Pubkey) -> Instruction {
-    Instruction {
-        program_id: ctx.program_id,
-        accounts: vec![AccountMeta::new(oracle, false)],
-        data: vec![Ix::AdvancePhase as u8],
-    }
-}
-
-fn vote_payload(kind: u8, stake: u64) -> Vec<u8> {
-    let mut data = Vec::with_capacity(1 + 1 + 8);
-    data.push(Ix::VoteFact as u8);
-    data.push(kind);
-    data.extend_from_slice(&stake.to_le_bytes());
-    data
-}
-
-#[allow(clippy::too_many_arguments)]
-fn vote_fact_ix(
-    ctx: &TestCtx,
-    oracle: Pubkey,
-    fact: Pubkey,
-    fact_vote: Pubkey,
-    voter: Pubkey,
-    voter_kass: Pubkey,
-    vault: Pubkey,
-    data: Vec<u8>,
-) -> Instruction {
-    Instruction {
-        program_id: ctx.program_id,
-        accounts: vec![
-            AccountMeta::new(oracle, false),
-            AccountMeta::new(fact, false),
-            AccountMeta::new(fact_vote, false),
-            AccountMeta::new(voter, true),
-            AccountMeta::new(voter_kass, false),
-            AccountMeta::new(vault, false),
-            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
-            AccountMeta::new_readonly(system_program::id(), false),
-        ],
-        data,
-    }
-}
-
 fn claim_pda(program_id: &Pubkey, oracle: &Pubkey, proposer: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[b"claim", oracle.as_ref(), proposer.as_ref()], program_id)
-}
-
-fn submit_ai_payload(option: u8) -> Vec<u8> {
-    let mut data = Vec::with_capacity(1 + 32 + 32 + 32 + 1);
-    data.push(Ix::SubmitAiClaim as u8);
-    data.extend_from_slice(&[0xAA; 32]); // model_id
-    data.extend_from_slice(&[0xBB; 32]); // params_hash
-    data.extend_from_slice(&[0xCC; 32]); // io_hash
-    data.push(option);
-    data
-}
-
-fn submit_ai_claim_ix(
-    ctx: &TestCtx,
-    oracle: Pubkey,
-    proposer: Pubkey,
-    claim: Pubkey,
-    authority: Pubkey,
-    data: Vec<u8>,
-) -> Instruction {
-    Instruction {
-        program_id: ctx.program_id,
-        accounts: vec![
-            AccountMeta::new(oracle, false),
-            AccountMeta::new(proposer, false),
-            AccountMeta::new(claim, false),
-            AccountMeta::new(authority, true),
-            AccountMeta::new_readonly(system_program::id(), false),
-        ],
-        data,
-    }
-}
-
-fn finalize_ai_claims_ix(ctx: &TestCtx, oracle: Pubkey, tail: &[Pubkey]) -> Instruction {
-    let mut accounts = Vec::with_capacity(1 + tail.len());
-    accounts.push(AccountMeta::new(oracle, false));
-    for k in tail {
-        accounts.push(AccountMeta::new(*k, false));
-    }
-    Instruction {
-        program_id: ctx.program_id,
-        accounts,
-        data: vec![Ix::FinalizeAiClaims as u8],
-    }
 }
 
 /// Path to the committed golden CU snapshot the metering test compares against.

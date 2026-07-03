@@ -21,10 +21,9 @@ use kassandra_program::{
     state::{Phase, CLAIM_OPTION_NONE},
 };
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction, InstructionError},
+    instruction::InstructionError,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    system_program,
     transaction::TransactionError,
 };
 
@@ -43,40 +42,6 @@ fn submit_payload(option: u8) -> Vec<u8> {
     data.extend_from_slice(&[0xCC; 32]); // io_hash
     data.push(option);
     data
-}
-
-fn submit_ai_claim_ix(
-    ctx: &TestCtx,
-    oracle: Pubkey,
-    proposer: Pubkey,
-    claim: Pubkey,
-    authority: Pubkey,
-    data: Vec<u8>,
-) -> Instruction {
-    Instruction {
-        program_id: ctx.program_id,
-        accounts: vec![
-            AccountMeta::new(oracle, false),
-            AccountMeta::new(proposer, false),
-            AccountMeta::new(claim, false),
-            AccountMeta::new(authority, true),
-            AccountMeta::new_readonly(system_program::id(), false),
-        ],
-        data,
-    }
-}
-
-fn finalize_ai_claims_ix(ctx: &TestCtx, oracle: Pubkey, tail: &[Pubkey]) -> Instruction {
-    let mut accounts = Vec::with_capacity(1 + tail.len());
-    accounts.push(AccountMeta::new(oracle, false));
-    for k in tail {
-        accounts.push(AccountMeta::new(*k, false));
-    }
-    Instruction {
-        program_id: ctx.program_id,
-        accounts,
-        data: vec![Ix::FinalizeAiClaims as u8],
-    }
 }
 
 // ----- fixture --------------------------------------------------------------

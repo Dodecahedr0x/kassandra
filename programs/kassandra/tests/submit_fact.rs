@@ -14,13 +14,11 @@ use common::*;
 
 use kassandra_program::{error::KassandraError, instruction::Ix, state::Fact};
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction, InstructionError},
+    instruction::InstructionError,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    system_program,
     transaction::TransactionError,
 };
-use spl_token::ID as TOKEN_PROGRAM_ID;
 
 /// Encode a `submit_fact` instruction payload.
 fn payload(content_hash: &[u8; 32], stake: u64, uri: &[u8]) -> Vec<u8> {
@@ -31,31 +29,6 @@ fn payload(content_hash: &[u8; 32], stake: u64, uri: &[u8]) -> Vec<u8> {
     data.extend_from_slice(&(uri.len() as u16).to_le_bytes());
     data.extend_from_slice(uri);
     data
-}
-
-/// Build the `submit_fact` instruction with the locked-in account order.
-fn submit_fact_ix(
-    ctx: &TestCtx,
-    oracle: Pubkey,
-    fact: Pubkey,
-    submitter: Pubkey,
-    submitter_kass: Pubkey,
-    vault: Pubkey,
-    data: Vec<u8>,
-) -> Instruction {
-    Instruction {
-        program_id: ctx.program_id,
-        accounts: vec![
-            AccountMeta::new(oracle, false),
-            AccountMeta::new(fact, false),
-            AccountMeta::new(submitter, true),
-            AccountMeta::new(submitter_kass, false),
-            AccountMeta::new(vault, false),
-            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
-            AccountMeta::new_readonly(system_program::id(), false),
-        ],
-        data,
-    }
 }
 
 /// One seeded-oracle + funded-submitter fixture for a `submit_fact` test.
