@@ -4,7 +4,7 @@
 //! `InstructionError::Custom(n)`, so existing values must never be renumbered.
 //! New errors are APPENDED with the next free discriminant.
 
-use pinocchio::program_error::ProgramError;
+use pinocchio::error::ProgramError;
 
 /// Custom error codes for the Kassandra dispute-core program.
 ///

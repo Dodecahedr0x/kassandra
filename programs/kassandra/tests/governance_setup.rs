@@ -30,8 +30,8 @@ fn admin_sets_governance_records_linkage_and_defaults() {
     // Pre-handoff: linkage unset, monetary params == config defaults.
     let p0 = ctx.protocol(protocol_pda);
     assert_eq!(p0.governance_set, 0);
-    assert_eq!(p0.dao_authority, [0u8; 32]);
-    assert_eq!(p0.kass_dao, [0u8; 32]);
+    assert_eq!(p0.dao_authority, [0u8; 32].into());
+    assert_eq!(p0.kass_dao, [0u8; 32].into());
     assert_eq!(p0.emission_num, 0);
     assert_eq!(p0.emission_den, 1);
     assert_eq!(p0.total_supply_cap, 0);
@@ -60,8 +60,8 @@ fn admin_sets_governance_records_linkage_and_defaults() {
     let p = ctx.protocol(protocol_pda);
     assert_eq!(p.account_type, AccountType::Protocol.as_u8());
     assert_eq!(p.governance_set, 1);
-    assert_eq!(p.dao_authority, dao_authority.to_bytes());
-    assert_eq!(p.kass_dao, kass_dao.to_bytes());
+    assert_eq!(p.dao_authority, dao_authority.to_bytes().into());
+    assert_eq!(p.kass_dao, kass_dao.to_bytes().into());
     // Monetary params untouched by the handoff.
     assert_eq!(p.emission_den, 1);
     assert_eq!(
@@ -118,8 +118,8 @@ fn handoff_is_one_shot_admin_rejected_after_handoff() {
     // is unsignable from a test, exactly like the `set_config`/`resolve_deadend`
     // gates (see governance_seam.rs). The linkage is therefore unchanged.
     let p = ctx.protocol(protocol_pda);
-    assert_eq!(p.dao_authority, vault.to_bytes());
-    assert_eq!(p.kass_dao, kass_dao.to_bytes());
+    assert_eq!(p.dao_authority, vault.to_bytes().into());
+    assert_eq!(p.kass_dao, kass_dao.to_bytes().into());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ fn rejects_kass_dao_with_bad_discriminator() {
     // Owned by the futarchy program, but the first 8 bytes are NOT the `Dao`
     // Anchor discriminator.
     let kass_dao = Pubkey::new_unique();
-    let owner = Pubkey::new_from_array(kassandra_program::cpi::metadao_v06::FUTARCHY_ID);
+    let owner = Pubkey::new_from_array(kassandra_program::cpi::metadao_v06::FUTARCHY_ID.to_bytes());
     let mut blob = common::build_dao_blob(1, 1_000_000, 0, 0);
     blob[..8].copy_from_slice(&[0xDE; 8]); // clobber the discriminator
     ctx.fabricate_owned_account(kass_dao, owner, blob);

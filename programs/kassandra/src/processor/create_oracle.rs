@@ -50,15 +50,14 @@
 
 use bytemuck::Zeroable;
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::{Seed, Signer},
-    program_error::ProgramError,
-    pubkey::{find_program_address, Pubkey},
-    sysvars::{rent::Rent, Sysvar},
+    account::AccountView as AccountInfo,
+    address::Address as Pubkey,
+    cpi::{Seed, Signer},
+    error::ProgramError,
     ProgramResult,
 };
 use pinocchio_token::instructions::{Burn, InitializeAccount3, MintTo};
-use pinocchio_token::state::TokenAccount;
+use pinocchio_token::state::Account as TokenAccount;
 
 use crate::{
     clock::now,
@@ -66,6 +65,7 @@ use crate::{
     error::KassandraError,
     fee::{bumped_fee_ema, decay_fee_ema, fee_for_ema},
     processor::guards::{assert_key, assert_signer, create_pda, load_protocol},
+    rent::minimum_rent,
     state::{AccountType, Oracle, Phase, Protocol},
 };
 
@@ -73,8 +73,7 @@ use crate::{
 /// deadline[8] ++ twap_window[8].
 const PAYLOAD_LEN: usize = 57;
 
-
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     // --- payload parse (exact length) --------------------------------------
     if payload.len() != PAYLOAD_LEN {
         return Err(ProgramError::InvalidInstructionData);
@@ -116,15 +115,16 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
 
     // --- PDA derivations ----------------------------------------------------
     let nonce_le = nonce.to_le_bytes();
-    let (expected_oracle, oracle_bump) = find_program_address(&[b"oracle", &nonce_le], program_id);
+    let (expected_oracle, oracle_bump) =
+        Pubkey::find_program_address(&[b"oracle", &nonce_le], program_id);
     assert_key(oracle_ai, &expected_oracle)?;
 
     let (expected_vault, vault_bump) =
-        find_program_address(&[b"vault", oracle_ai.key().as_ref()], program_id);
+        Pubkey::find_program_address(&[b"vault", oracle_ai.address().as_ref()], program_id);
     assert_key(stake_vault_ai, &expected_vault)?;
 
     // Reject if the oracle PDA already exists (a duplicate nonce).
-    if oracle_ai.lamports() != 0 || !oracle_ai.data_is_empty() {
+    if oracle_ai.lamports() != 0 || !oracle_ai.is_data_empty() {
         return Err(KassandraError::InvalidAccount.into());
     }
 
@@ -138,7 +138,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         // The burn source must be a KASS token account; the SPL Burn additionally
         // proves the creator (signer) is its owner/delegate.
         let kass_token_mint = {
-            let data = creator_kass_ai.try_borrow_data()?;
+            let data = creator_kass_ai.try_borrow()?;
             if data.len() < 32 {
                 return Err(KassandraError::InvalidAccount.into());
             }
@@ -146,38 +146,28 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
             m.copy_from_slice(&data[0..32]);
             m
         };
-        if kass_token_mint != *kass_mint_ai.key() {
+        if kass_token_mint != kass_mint_ai.address().to_bytes() {
             return Err(KassandraError::InvalidAccount.into());
         }
-        Burn {
-            account: creator_kass_ai,
-            mint: kass_mint_ai,
-            authority: creator_ai,
-            amount: fee,
-        }
-        .invoke()?;
+        Burn::new(creator_kass_ai, kass_mint_ai, creator_ai, fee).invoke()?;
     }
     // Persist the new EMA state (protocol is writable).
     {
         let mut protocol_mut = protocol;
         protocol_mut.fee_ema = bumped_fee_ema(decayed_ema);
         protocol_mut.last_creation_unix = now_ts;
-        let mut data = protocol_ai.try_borrow_mut_data()?;
+        let mut data = protocol_ai.try_borrow_mut()?;
         data[..Protocol::LEN].copy_from_slice(bytemuck::bytes_of(&protocol_mut));
     }
 
     // --- create the stake vault (program-signed) ---------------------------
     // Create the bare SPL token account at the vault PDA, then initialize it on
     // the KASS mint with the oracle PDA as its token authority.
-    // Fetch the Rent sysvar ONCE and reuse it for both accounts created below
-    // (the vault + the Oracle) — the rent parameters are constant within a tx, so
-    // a second `Rent::get()` syscall would be pure overhead.
-    let rent = Rent::get()?;
-    let vault_rent = rent.minimum_balance(TokenAccount::LEN);
+    let vault_rent = minimum_rent(TokenAccount::LEN)?;
     let vault_bump_seed = [vault_bump];
     let vault_seeds = [
         Seed::from(b"vault".as_ref()),
-        Seed::from(oracle_ai.key().as_ref()),
+        Seed::from(oracle_ai.address().as_ref()),
         Seed::from(&vault_bump_seed),
     ];
     create_pda(
@@ -191,7 +181,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     InitializeAccount3 {
         account: stake_vault_ai,
         mint: kass_mint_ai,
-        owner: oracle_ai.key(),
+        owner: oracle_ai.address(),
     }
     .invoke()?;
 
@@ -211,7 +201,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         // Verify + derive the mint-authority PDA, then assert it is the kass_mint's
         // SPL mint authority (the bootstrapping requirement).
         let (expected_mint_auth, mint_auth_bump) =
-            find_program_address(&[MINT_AUTHORITY_SEED], program_id);
+            Pubkey::find_program_address(&[MINT_AUTHORITY_SEED], program_id);
         assert_key(mint_authority_ai, &expected_mint_auth)?;
         assert_mint_authority_is(kass_mint_ai, &expected_mint_auth)?;
 
@@ -220,17 +210,17 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
             Seed::from(MINT_AUTHORITY_SEED),
             Seed::from(&mint_auth_bump_seed),
         ];
-        MintTo {
-            mint: kass_mint_ai,
-            account: stake_vault_ai,
-            mint_authority: mint_authority_ai,
-            amount: reward_emission,
-        }
+        MintTo::new(
+            kass_mint_ai,
+            stake_vault_ai,
+            mint_authority_ai,
+            reward_emission,
+        )
         .invoke_signed(&[Signer::from(&mint_auth_seeds)])?;
     }
 
     // --- create + initialize the Oracle (program-signed) -------------------
-    let oracle_rent = rent.minimum_balance(Oracle::LEN);
+    let oracle_rent = minimum_rent(Oracle::LEN)?;
     let oracle_bump_seed = [oracle_bump];
     let oracle_seeds = Oracle::signer_seeds(&nonce_le, &oracle_bump_seed);
     create_pda(
@@ -250,10 +240,10 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
 
     let mut oracle = Oracle::zeroed();
     oracle.account_type = AccountType::Oracle.as_u8();
-    oracle.creator = *creator_ai.key();
+    oracle.creator = *creator_ai.address();
     oracle.kass_mint = protocol.kass_mint;
     oracle.usdc_mint = protocol.usdc_mint;
-    oracle.stake_vault = *stake_vault_ai.key();
+    oracle.stake_vault = *stake_vault_ai.address();
     oracle.deadline = deadline;
     oracle.phase_ends_at = phase_ends_at;
     oracle.twap_window = twap_window;
@@ -295,7 +285,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     oracle.challenge_success_kass_fee_num = protocol.challenge_success_kass_fee_num;
     oracle.challenge_success_kass_fee_den = protocol.challenge_success_kass_fee_den;
     {
-        let mut data = oracle_ai.try_borrow_mut_data()?;
+        let mut data = oracle_ai.try_borrow_mut()?;
         data.copy_from_slice(bytemuck::bytes_of(&oracle));
     }
 
@@ -325,7 +315,7 @@ fn compute_reward_emission(
     if emission_num == 0 || emission_den == 0 || total_supply_cap == 0 {
         return Ok(0);
     }
-    let data = kass_mint_ai.try_borrow_data()?;
+    let data = kass_mint_ai.try_borrow()?;
     if data.len() < MINT_SUPPLY_OFFSET + 8 {
         return Err(KassandraError::InvalidAccount.into());
     }
@@ -350,7 +340,7 @@ fn compute_reward_emission(
 /// or any other key is rejected — emission requires the program PDA be the sole
 /// minter.
 fn assert_mint_authority_is(kass_mint_ai: &AccountInfo, expected: &Pubkey) -> ProgramResult {
-    let data = kass_mint_ai.try_borrow_data()?;
+    let data = kass_mint_ai.try_borrow()?;
     if data.len() < MINT_AUTHORITY_KEY_OFFSET + 32 {
         return Err(KassandraError::BadMintAuthority.into());
     }

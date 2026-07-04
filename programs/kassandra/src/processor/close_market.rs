@@ -44,19 +44,17 @@
 //! claims / `settle_challenge`.
 
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::Signer,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Signer,
+    error::ProgramError, ProgramResult,
 };
 use pinocchio_token::instructions::CloseAccount;
-use pinocchio_token::state::TokenAccount;
+use pinocchio_token::state::Account as TokenAccount;
 
 use crate::{
     error::KassandraError,
     processor::guards::{
-        assert_key, assert_owned_by_program, load_oracle, require_terminal, verify_oracle_pda,
+        assert_key, assert_owned_by_program, drain_lamports, load_oracle, require_terminal,
+        verify_oracle_pda,
     },
     state::{AccountType, Market, Oracle},
 };
@@ -64,8 +62,7 @@ use crate::{
 /// Exact payload length: `oracle_nonce[8]`.
 const PAYLOAD_LEN: usize = 8;
 
-
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     if payload.len() != PAYLOAD_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -89,13 +86,13 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         return Err(KassandraError::InvalidAccount.into());
     }
     let market: Market = {
-        let data = market_ai.try_borrow_data()?;
+        let data = market_ai.try_borrow()?;
         bytemuck::pod_read_unaligned::<Market>(&data[..Market::LEN])
     };
     if market.account_type != AccountType::Market.as_u8() {
         return Err(KassandraError::InvalidAccount.into());
     }
-    if &market.oracle != oracle_ai.key() {
+    if &market.oracle != oracle_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
     if !market.is_settled() {
@@ -107,7 +104,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // The escrow is a canonical SPL token account; assert it is empty before
     // closing it (settle_challenge drained it). SPL would reject a non-empty
     // close anyway.
-    let escrow_amount = TokenAccount::from_account_info(escrow_ai)
+    let escrow_amount = TokenAccount::from_account_view(escrow_ai)
         .map_err(|_| KassandraError::InvalidAccount)?
         .amount();
     if escrow_amount != 0 {
@@ -119,22 +116,11 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     let nonce_le = nonce.to_le_bytes();
     let bump_seed = [oracle.bump];
     let seeds = Oracle::signer_seeds(&nonce_le, &bump_seed);
-    CloseAccount {
-        account: escrow_ai,
-        destination: rent_recipient_ai,
-        authority: oracle_ai,
-    }
-    .invoke_signed(&[Signer::from(&seeds)])?;
+    CloseAccount::new(escrow_ai, rent_recipient_ai, oracle_ai)
+        .invoke_signed(&[Signer::from(&seeds)])?;
 
     // 2. Close the Market PDA: drain its rent lamports → rent_recipient, then
     //    zero it. Idempotent by closure.
-    {
-        let mut from = market_ai.try_borrow_mut_lamports()?;
-        let mut to = rent_recipient_ai.try_borrow_mut_lamports()?;
-        *to = to
-            .checked_add(*from)
-            .ok_or(ProgramError::ArithmeticOverflow)?;
-        *from = 0;
-    }
+    drain_lamports(market_ai, rent_recipient_ai)?;
     market_ai.close()
 }

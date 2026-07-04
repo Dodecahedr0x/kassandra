@@ -8,10 +8,21 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 pinocchio = { workspace = true }
-pinocchio-pubkey = { workspace = true }
 pinocchio-system = { workspace = true }
 pinocchio-token = { workspace = true }
 bytemuck = { workspace = true }
+# `state::Pubkey` aliases pinocchio's `Address` (a `repr(transparent)` newtype
+# over `[u8; 32]`); the `bytemuck` feature gives it `Pod`/`Zeroable` so the
+# zero-copy account structs keep deriving them.
+solana-address = { version = "2", features = ["bytemuck"] }
+
+# The PDA helpers (`Pubkey::find_program_address` / `create_program_address`)
+# are SBF syscalls on-chain but live behind solana-address's `curve25519`
+# feature off-chain. Enable it for non-Solana targets so the native lib (built
+# by `cargo test`) compiles; the SBF build takes the syscall path and never
+# pulls curve25519-dalek (it is target-gated to non-Solana).
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+solana-address = { version = "2", features = ["curve25519"] }
 
 [dev-dependencies]
 litesvm = "0.6"

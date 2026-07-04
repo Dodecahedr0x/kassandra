@@ -49,7 +49,8 @@
 //! `dao_authority: [u8; 32]` ++ `kass_dao: [u8; 32]` (64 bytes).
 
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, error::ProgramError,
+    ProgramResult,
 };
 
 use crate::{
@@ -59,7 +60,7 @@ use crate::{
     state::Protocol,
 };
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     let [protocol_ai, authority_ai, kass_dao_ai, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -68,12 +69,10 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     if payload.len() < 64 {
         return Err(ProgramError::InvalidInstructionData);
     }
-    let mut dao_authority = [0u8; 32];
-    let mut kass_dao = [0u8; 32];
-    dao_authority.copy_from_slice(&payload[..32]);
-    kass_dao.copy_from_slice(&payload[32..64]);
+    let dao_authority: Pubkey = <[u8; 32]>::try_from(&payload[..32]).unwrap().into();
+    let kass_dao: Pubkey = <[u8; 32]>::try_from(&payload[32..64]).unwrap().into();
     // Both linkage keys must be non-zero (a zeroed key is the "unset" sentinel).
-    if dao_authority == [0u8; 32] || kass_dao == [0u8; 32] {
+    if dao_authority == Pubkey::default() || kass_dao == Pubkey::default() {
         return Err(KassandraError::InvalidAccount.into());
     }
 
@@ -85,12 +84,12 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // --- trust model: admin sets once, then dao_authority rotates -----------
     if protocol.is_governance_set() {
         // Post-handoff: only the current DAO authority may rotate the linkage.
-        if authority_ai.key() != &protocol.dao_authority {
+        if authority_ai.address() != &protocol.dao_authority {
             return Err(KassandraError::GovernanceAlreadySet.into());
         }
     } else {
         // Pre-handoff: only the init admin may perform the one-time handoff.
-        if authority_ai.key() != &protocol.admin {
+        if authority_ai.address() != &protocol.admin {
             return Err(KassandraError::Unauthorized.into());
         }
     }
@@ -100,11 +99,11 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     assert_key(kass_dao_ai, &kass_dao)?;
     // (b) It must be a real futarchy `Dao`: owned by the futarchy program, with
     //     the `Dao` Anchor account discriminator as its first 8 bytes.
-    if !kass_dao_ai.is_owned_by(&md6::FUTARCHY_ID) {
+    if !kass_dao_ai.owned_by(&md6::FUTARCHY_ID) {
         return Err(KassandraError::InvalidFutarchyDao.into());
     }
     {
-        let data = kass_dao_ai.try_borrow_data()?;
+        let data = kass_dao_ai.try_borrow()?;
         if data.len() < 8 || data[..8] != md6::DAO_ACCOUNT_DISCRIMINATOR {
             return Err(KassandraError::InvalidFutarchyDao.into());
         }
@@ -122,7 +121,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     protocol.kass_dao = kass_dao;
     protocol.governance_set = 1;
     {
-        let mut data = protocol_ai.try_borrow_mut_data()?;
+        let mut data = protocol_ai.try_borrow_mut()?;
         data[..Protocol::LEN].copy_from_slice(bytemuck::bytes_of(&protocol));
     }
 

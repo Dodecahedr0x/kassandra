@@ -23,18 +23,15 @@
 
 use bytemuck::Zeroable;
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::Seed,
-    program_error::ProgramError,
-    pubkey::{find_program_address, Pubkey},
-    sysvars::{rent::Rent, Sysvar},
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Seed,
+    error::ProgramError, ProgramResult,
 };
 
 use crate::{
     clock::{now, require_before_end, require_phase},
     error::KassandraError,
     processor::guards::{assert_key, assert_signer, create_pda, load_oracle, load_proposer},
+    rent::minimum_rent,
     state::{AccountType, AiClaim, Oracle, Phase},
 };
 
@@ -68,7 +65,7 @@ impl<'a> Args<'a> {
     }
 }
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     let args = Args::parse(payload)?;
 
     let [oracle_ai, proposer_ai, claim_ai, authority_ai, system_prog_ai, ..] = accounts else {
@@ -90,10 +87,10 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     require_before_end(&oracle, now()?)?;
 
     // The proposer must belong to this oracle and be controlled by the signer.
-    if proposer.oracle != *oracle_ai.key() {
+    if proposer.oracle != *oracle_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
-    if proposer.authority != *authority_ai.key() {
+    if proposer.authority != *authority_ai.address() {
         return Err(KassandraError::Unauthorized.into());
     }
     // A disqualified proposer has no standing to submit a claim.
@@ -107,27 +104,27 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     }
 
     // --- ai_claim PDA derivation + duplicate rejection ----------------------
-    let (expected_claim, bump) = find_program_address(
+    let (expected_claim, bump) = Pubkey::find_program_address(
         &[
             b"claim",
-            oracle_ai.key().as_ref(),
-            proposer_ai.key().as_ref(),
+            oracle_ai.address().as_ref(),
+            proposer_ai.address().as_ref(),
         ],
         program_id,
     );
     assert_key(claim_ai, &expected_claim)?;
     // An already-funded PDA means this proposer already submitted a claim.
-    if claim_ai.lamports() != 0 || !claim_ai.data_is_empty() {
+    if claim_ai.lamports() != 0 || !claim_ai.is_data_empty() {
         return Err(KassandraError::DuplicateClaim.into());
     }
 
     // --- create the AiClaim account (program-signed) ------------------------
-    let rent = Rent::get()?.minimum_balance(AiClaim::LEN);
+    let rent = minimum_rent(AiClaim::LEN)?;
     let bump_seed = [bump];
     let signer_seeds = [
         Seed::from(b"claim".as_ref()),
-        Seed::from(oracle_ai.key().as_ref()),
-        Seed::from(proposer_ai.key().as_ref()),
+        Seed::from(oracle_ai.address().as_ref()),
+        Seed::from(proposer_ai.address().as_ref()),
         Seed::from(&bump_seed),
     ];
     create_pda(
@@ -142,8 +139,8 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // --- initialize the AiClaim ---------------------------------------------
     let mut claim = AiClaim::zeroed();
     claim.account_type = AccountType::AiClaim.as_u8();
-    claim.oracle = *oracle_ai.key();
-    claim.proposer = *proposer_ai.key();
+    claim.oracle = *oracle_ai.address();
+    claim.proposer = *proposer_ai.address();
     claim.model_id = *args.model_id;
     claim.params_hash = *args.params_hash;
     claim.io_hash = *args.io_hash;
@@ -152,9 +149,9 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     claim.bump = bump;
     // Record the proposer's human authority (== proposer.authority, asserted
     // above) so close_ai_claim can reclaim rent to it without the Proposer.
-    claim.authority = *authority_ai.key();
+    claim.authority = *authority_ai.address();
     {
-        let mut data = claim_ai.try_borrow_mut_data()?;
+        let mut data = claim_ai.try_borrow_mut()?;
         data.copy_from_slice(bytemuck::bytes_of(&claim));
     }
 
@@ -164,7 +161,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         proposer.flipped = 1;
     }
     {
-        let mut data = proposer_ai.try_borrow_mut_data()?;
+        let mut data = proposer_ai.try_borrow_mut()?;
         data[..crate::state::Proposer::LEN].copy_from_slice(bytemuck::bytes_of(&proposer));
     }
 

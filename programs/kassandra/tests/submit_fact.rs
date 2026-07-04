@@ -107,8 +107,8 @@ fn submit_fact_happy_path() {
     let f: Fact = ctx.fact(fact);
     assert_eq!(f.content_hash, content_hash);
     assert_eq!(f.stake, stake);
-    assert_eq!(f.proposer, submitter.pubkey().to_bytes());
-    assert_eq!(f.oracle, oracle.to_bytes());
+    assert_eq!(f.proposer, submitter.pubkey().to_bytes().into());
+    assert_eq!(f.oracle, oracle.to_bytes().into());
     assert_eq!(f.uri_len as usize, uri.len());
     assert_eq!(&f.uri[..uri.len()], uri);
     assert_eq!(f.approve_stake, 0);

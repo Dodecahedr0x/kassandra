@@ -16,7 +16,7 @@ use solana_sdk::{
 /// (signer, writable) payer account so the transaction is well-formed.
 fn ix_with_data(ctx: &TestCtx, data: Vec<u8>) -> Instruction {
     Instruction {
-        program_id: Pubkey::new_from_array(kassandra_program::ID),
+        program_id: Pubkey::new_from_array(kassandra_program::ID.to_bytes()),
         accounts: vec![AccountMeta::new(ctx.payer.pubkey(), true)],
         data,
     }

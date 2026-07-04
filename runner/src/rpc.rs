@@ -587,7 +587,7 @@ mod tests {
     fn sample_fact(oracle: [u8; 32], content_hash: [u8; 32], uri: &str, agreed: bool) -> Fact {
         let mut f = Fact::zeroed();
         f.account_type = AccountType::Fact.as_u8();
-        f.oracle = oracle;
+        f.oracle = oracle.into();
         f.content_hash = content_hash;
         f.uri_len = uri.len() as u16;
         f.uri[..uri.len()].copy_from_slice(uri.as_bytes());

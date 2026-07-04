@@ -31,7 +31,7 @@ pub use solana_pubkey::Pubkey;
 pub use kassandra_program::instruction::Ix;
 
 /// The Kassandra dispute-core program ID (`programs/kassandra/src/lib.rs`).
-pub const PROGRAM_ID: Pubkey = Pubkey::new_from_array(kassandra_program::ID);
+pub const PROGRAM_ID: Pubkey = Pubkey::new_from_array(kassandra_program::ID.to_bytes());
 
 /// SPL Token program ID.
 pub const TOKEN_PROGRAM_ID: Pubkey =

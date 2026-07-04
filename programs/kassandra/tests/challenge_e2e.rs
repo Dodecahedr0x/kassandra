@@ -82,10 +82,10 @@ const BASE_RESERVE: u64 = 100_000_000_000;
 const QUOTE_NEUTRAL: u64 = 100_000_000;
 
 fn vault_id() -> Pubkey {
-    Pubkey::new_from_array(metadao::CONDITIONAL_VAULT_ID)
+    Pubkey::new_from_array(metadao::CONDITIONAL_VAULT_ID.to_bytes())
 }
 fn amm_id() -> Pubkey {
-    Pubkey::new_from_array(metadao::AMM_ID)
+    Pubkey::new_from_array(metadao::AMM_ID.to_bytes())
 }
 
 fn ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
@@ -98,7 +98,7 @@ fn ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
 
 fn cond_mint(vault: &Pubkey, index: u8) -> Pubkey {
     Pubkey::find_program_address(
-        &metadao::conditional_token_mint_seeds(&vault.to_bytes(), &[index]),
+        &metadao::conditional_token_mint_seeds(&vault.to_bytes().into(), &[index]),
         &vault_id(),
     )
     .0
@@ -407,14 +407,18 @@ fn setup_market(ctx: &mut TestCtx, resolver: Pubkey) -> (MarketAccounts, Pubkey,
     let question_id = [7u8; 32];
 
     let (question, _) = Pubkey::find_program_address(
-        &metadao::question_seeds(&question_id, &resolver_arr, &[num_outcomes]),
+        &metadao::question_seeds(&question_id, &resolver_arr.into(), &[num_outcomes]),
         &vault_id(),
     );
     let question_arr = question.to_bytes();
-    let (kass_vault, _) =
-        Pubkey::find_program_address(&metadao::vault_seeds(&question_arr, &kass_arr), &vault_id());
-    let (usdc_vault, _) =
-        Pubkey::find_program_address(&metadao::vault_seeds(&question_arr, &usdc_arr), &vault_id());
+    let (kass_vault, _) = Pubkey::find_program_address(
+        &metadao::vault_seeds(&question_arr.into(), &kass_arr.into()),
+        &vault_id(),
+    );
+    let (usdc_vault, _) = Pubkey::find_program_address(
+        &metadao::vault_seeds(&question_arr.into(), &usdc_arr.into()),
+        &vault_id(),
+    );
 
     let pass_mint = cond_mint(&kass_vault, 0);
     let fail_mint = cond_mint(&kass_vault, 1);
@@ -436,7 +440,8 @@ fn setup_market(ctx: &mut TestCtx, resolver: Pubkey) -> (MarketAccounts, Pubkey,
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
         ],
-        data: metadao::initialize_question_data(&question_id, &resolver_arr, num_outcomes).to_vec(),
+        data: metadao::initialize_question_data(&question_id, &resolver_arr.into(), num_outcomes)
+            .to_vec(),
     };
     ctx.send_many(&cu(ix_q), &[]).expect("initialize_question");
 
@@ -1173,8 +1178,8 @@ fn donation_into_holder_inflates_stake_vault_not_theft() {
     );
     let mut a: AiClaim = bytemuck::Zeroable::zeroed();
     a.account_type = AccountType::AiClaim.as_u8();
-    a.oracle = oracle.to_bytes();
-    a.proposer = proposer.to_bytes();
+    a.oracle = oracle.to_bytes().into();
+    a.proposer = proposer.to_bytes().into();
     a.option = 0;
     a.bump = bump;
     ctx.seed_program_account_at(claim, bytemuck::bytes_of(&a).to_vec());
@@ -1450,8 +1455,8 @@ fn run_fuzz_case(fc: &FuzzCase) -> Result<(), TestCaseError> {
     );
     let mut a: AiClaim = bytemuck::Zeroable::zeroed();
     a.account_type = AccountType::AiClaim.as_u8();
-    a.oracle = oracle.to_bytes();
-    a.proposer = proposer.to_bytes();
+    a.oracle = oracle.to_bytes().into();
+    a.proposer = proposer.to_bytes().into();
     a.option = 0;
     a.bump = bump;
     ctx.seed_program_account_at(claim, bytemuck::bytes_of(&a).to_vec());

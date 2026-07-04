@@ -63,7 +63,7 @@ fn dao_sets_config_and_new_oracle_snapshots_new_values() {
     assert_eq!(p.threshold_num, 3);
     assert_eq!(p.threshold_den, 4);
     // Identity/linkage untouched.
-    assert_eq!(p.dao_authority, dao.pubkey().to_bytes());
+    assert_eq!(p.dao_authority, dao.pubkey().to_bytes().into());
     assert_eq!(p.governance_set, 1);
 
     // A subsequently-created oracle snapshots the NEW values.

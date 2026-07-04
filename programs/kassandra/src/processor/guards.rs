@@ -3,14 +3,14 @@
 //! Kept deliberately minimal — only the checks the current processors need.
 
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::{Seed, Signer},
-    program_error::ProgramError,
-    pubkey::{create_program_address, Pubkey},
+    account::AccountView as AccountInfo,
+    address::Address as Pubkey,
+    cpi::{Seed, Signer},
+    error::ProgramError,
     ProgramResult,
 };
 use pinocchio_system::instructions::CreateAccount;
-use pinocchio_token::state::TokenAccount;
+use pinocchio_token::state::Account as TokenAccount;
 
 use crate::{
     error::KassandraError,
@@ -23,7 +23,7 @@ use crate::{
 /// (`create_oracle` et al.). Guarded against drift by the `protocol_pda_const`
 /// integration test, which re-derives it.
 pub const PROTOCOL_PDA: Pubkey =
-    pinocchio_pubkey::pubkey!("DUpkpXThaPjDS7TtwwdMJHam7Ki6a8Fg9bmvNf5ggMn6");
+    Pubkey::from_str_const("DUpkpXThaPjDS7TtwwdMJHam7Ki6a8Fg9bmvNf5ggMn6");
 
 /// Canonical bump for [`PROTOCOL_PDA`] (`init_protocol` signs the create with it
 /// instead of deriving via `find_program_address`). Guarded by the same test.
@@ -32,7 +32,7 @@ pub const PROTOCOL_BUMP: u8 = 255;
 /// Require that `account` is owned by `program_id`, else
 /// [`KassandraError::InvalidAccount`].
 pub fn assert_owned_by_program(account: &AccountInfo, program_id: &Pubkey) -> ProgramResult {
-    if !account.is_owned_by(program_id) {
+    if !account.owned_by(program_id) {
         return Err(KassandraError::InvalidAccount.into());
     }
     Ok(())
@@ -57,7 +57,7 @@ pub fn assert_signer(account: &AccountInfo) -> ProgramResult {
 /// needed).
 pub fn assert_dao_authority(protocol: &Protocol, signer_ai: &AccountInfo) -> ProgramResult {
     assert_signer(signer_ai)?;
-    if signer_ai.key() != &protocol.dao_authority {
+    if signer_ai.address() != &protocol.dao_authority {
         return Err(KassandraError::Unauthorized.into());
     }
     Ok(())
@@ -67,9 +67,25 @@ pub fn assert_dao_authority(protocol: &Protocol, signer_ai: &AccountInfo) -> Pro
 /// [`KassandraError::InvalidAccount`]. Used to pin sysvar/program ids and
 /// stored references (e.g. `oracle.stake_vault`).
 pub fn assert_key(account: &AccountInfo, expected: &Pubkey) -> ProgramResult {
-    if account.key() != expected {
+    if account.address() != expected {
         return Err(KassandraError::InvalidAccount.into());
     }
+    Ok(())
+}
+
+/// Move ALL lamports out of `from` into `to` (both must be writable), leaving
+/// `from` at zero. The shared rent-reclaim primitive for the permissionless
+/// closers (`close_market`, `close_ai_claim`, `sweep_oracle`, the claim
+/// finalizers): drain first, then `AccountInfo::close` the emptied PDA. A
+/// recipient overflow is a hard [`ProgramError::ArithmeticOverflow`].
+pub fn drain_lamports(from: &mut AccountInfo, to: &mut AccountInfo) -> ProgramResult {
+    let amount = from.lamports();
+    let credited = to
+        .lamports()
+        .checked_add(amount)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+    to.set_lamports(credited);
+    from.set_lamports(0);
     Ok(())
 }
 
@@ -83,7 +99,7 @@ pub fn load_oracle(account: &AccountInfo, program_id: &Pubkey) -> Result<Oracle,
         return Err(KassandraError::InvalidAccount.into());
     }
     let oracle: Oracle = {
-        let data = account.try_borrow_data()?;
+        let data = account.try_borrow()?;
         bytemuck::pod_read_unaligned::<Oracle>(&data[..Oracle::LEN])
     };
     if oracle.account_type != AccountType::Oracle.as_u8() {
@@ -101,7 +117,7 @@ pub fn load_fact(account: &AccountInfo, program_id: &Pubkey) -> Result<Fact, Pro
         return Err(KassandraError::InvalidAccount.into());
     }
     let fact: Fact = {
-        let data = account.try_borrow_data()?;
+        let data = account.try_borrow()?;
         bytemuck::pod_read_unaligned::<Fact>(&data[..Fact::LEN])
     };
     if fact.account_type != AccountType::Fact.as_u8() {
@@ -120,7 +136,7 @@ pub fn load_proposer(account: &AccountInfo, program_id: &Pubkey) -> Result<Propo
         return Err(KassandraError::InvalidAccount.into());
     }
     let proposer: Proposer = {
-        let data = account.try_borrow_data()?;
+        let data = account.try_borrow()?;
         bytemuck::pod_read_unaligned::<Proposer>(&data[..Proposer::LEN])
     };
     if proposer.account_type != AccountType::Proposer.as_u8() {
@@ -138,7 +154,7 @@ pub fn load_ai_claim(account: &AccountInfo, program_id: &Pubkey) -> Result<AiCla
         return Err(KassandraError::InvalidAccount.into());
     }
     let claim: AiClaim = {
-        let data = account.try_borrow_data()?;
+        let data = account.try_borrow()?;
         bytemuck::pod_read_unaligned::<AiClaim>(&data[..AiClaim::LEN])
     };
     if claim.account_type != AccountType::AiClaim.as_u8() {
@@ -164,7 +180,7 @@ pub fn load_protocol(account: &AccountInfo, program_id: &Pubkey) -> Result<Proto
         return Err(KassandraError::InvalidAccount.into());
     }
     let protocol: Protocol = {
-        let data = account.try_borrow_data()?;
+        let data = account.try_borrow()?;
         bytemuck::pod_read_unaligned::<Protocol>(&data[..Protocol::LEN])
     };
     if protocol.account_type != AccountType::Protocol.as_u8() {
@@ -199,7 +215,7 @@ pub fn create_pda(
 /// single instruction's account tail (no proposer/fact counted twice).
 pub fn require_distinct(prior: &[AccountInfo], key: &Pubkey) -> ProgramResult {
     for a in prior {
-        if a.key() == key {
+        if a.address() == key {
             return Err(KassandraError::InvalidAccount.into());
         }
     }
@@ -217,9 +233,10 @@ pub fn verify_oracle_pda(
     nonce: u64,
 ) -> ProgramResult {
     let nonce_le = nonce.to_le_bytes();
-    let derived = create_program_address(&[b"oracle", &nonce_le, &[oracle.bump]], program_id)
-        .map_err(|_| KassandraError::InvalidAccount)?;
-    if &derived != oracle_ai.key() {
+    let derived =
+        Pubkey::create_program_address(&[b"oracle", &nonce_le, &[oracle.bump]], program_id)
+            .map_err(|_| KassandraError::InvalidAccount)?;
+    if &derived != oracle_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
     Ok(())
@@ -234,8 +251,8 @@ pub fn assert_token_account(
     expected_mint: &Pubkey,
     expected_owner: &Pubkey,
 ) -> ProgramResult {
-    let token = TokenAccount::from_account_info(account)
-        .map_err(|_| KassandraError::InvalidAccount)?;
+    let token =
+        TokenAccount::from_account_view(account).map_err(|_| KassandraError::InvalidAccount)?;
     if token.mint() != expected_mint || token.owner() != expected_owner {
         return Err(KassandraError::InvalidAccount.into());
     }

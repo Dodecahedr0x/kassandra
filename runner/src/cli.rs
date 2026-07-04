@@ -915,7 +915,7 @@ mod tests {
         let fact_uri = "https://facts.example/btc";
         let mut fact = Fact::zeroed();
         fact.account_type = AccountType::Fact.as_u8();
-        fact.oracle = oracle_bytes;
+        fact.oracle = oracle_bytes.into();
         fact.content_hash = content_hash;
         fact.uri_len = fact_uri.len() as u16;
         fact.uri[..fact_uri.len()].copy_from_slice(fact_uri.as_bytes());

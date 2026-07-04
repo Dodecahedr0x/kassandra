@@ -19,13 +19,17 @@
 //! The 16-byte little-endian `u128` TWAP (quote units per base × `1e12`).
 
 use pinocchio::{
-    account_info::AccountInfo, program::set_return_data, program_error::ProgramError,
-    pubkey::Pubkey, ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::set_return_data,
+    error::ProgramError, ProgramResult,
 };
 
 use crate::{price::kass_price, processor::guards::load_protocol};
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -> ProgramResult {
+pub fn process(
+    program_id: &Pubkey,
+    accounts: &mut [AccountInfo],
+    _payload: &[u8],
+) -> ProgramResult {
     let [protocol_ai, kass_dao_ai, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };

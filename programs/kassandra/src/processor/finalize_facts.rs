@@ -77,11 +77,8 @@
 //! `[b"oracle", nonce_le, bump]` program-sign the no-facts dead-end burn.
 
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::Signer,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Signer,
+    error::ProgramError, ProgramResult,
 };
 use pinocchio_token::instructions::Burn;
 
@@ -114,7 +111,7 @@ fn is_agreed(
             >= (dispute_bond_total as u128) * (threshold_num as u128)
 }
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     let [oracle_ai, kass_mint_ai, stake_vault_ai, token_prog_ai, tail @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -175,18 +172,20 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
 #[allow(clippy::too_many_arguments)]
 fn finalize_no_facts(
     program_id: &Pubkey,
-    oracle_ai: &AccountInfo,
+    oracle_ai: &mut AccountInfo,
     kass_mint_ai: &AccountInfo,
     stake_vault_ai: &AccountInfo,
     oracle: &mut Oracle,
-    proposers: &[AccountInfo],
+    proposers: &mut [AccountInfo],
     nonce: u64,
 ) -> ProgramResult {
-    for (i, p_ai) in proposers.iter().enumerate() {
-        require_distinct(&proposers[..i], p_ai.key())?;
+    for i in 0..proposers.len() {
+        let (prior, rest) = proposers.split_at_mut(i);
+        let p_ai = &mut rest[0];
+        require_distinct(prior, p_ai.address())?;
 
         let mut proposer = load_proposer(p_ai, program_id)?;
-        if proposer.oracle != *oracle_ai.key() {
+        if proposer.oracle != *oracle_ai.address() {
             return Err(KassandraError::InvalidAccount.into());
         }
         // Idempotency: each proposer is slashed exactly once.
@@ -201,7 +200,7 @@ fn finalize_no_facts(
         // already-disqualified branch.
         if proposer.is_disqualified() {
             proposer.slashed = 1;
-            let mut data = p_ai.try_borrow_mut_data()?;
+            let mut data = p_ai.try_borrow_mut()?;
             data[..Proposer::LEN].copy_from_slice(bytemuck::bytes_of(&proposer));
             continue;
         }
@@ -223,7 +222,7 @@ fn finalize_no_facts(
             .checked_sub(1)
             .ok_or(ProgramError::ArithmeticOverflow)?;
 
-        let mut data = p_ai.try_borrow_mut_data()?;
+        let mut data = p_ai.try_borrow_mut()?;
         data[..Proposer::LEN].copy_from_slice(bytemuck::bytes_of(&proposer));
     }
 
@@ -246,13 +245,8 @@ fn finalize_no_facts(
             let nonce_le = nonce.to_le_bytes();
             let bump_seed = [oracle.bump];
             let seeds = Oracle::signer_seeds(&nonce_le, &bump_seed);
-            Burn {
-                account: stake_vault_ai,
-                mint: kass_mint_ai,
-                authority: oracle_ai,
-                amount: burn_amount,
-            }
-            .invoke_signed(&[Signer::from(&seeds)])?;
+            Burn::new(stake_vault_ai, kass_mint_ai, oracle_ai, burn_amount)
+                .invoke_signed(&[Signer::from(&seeds)])?;
         }
     }
     write_oracle(oracle_ai, oracle)
@@ -262,17 +256,19 @@ fn finalize_no_facts(
 /// (`settled_count == fact_count`), advance to [`Phase::AiClaim`].
 fn finalize_with_facts(
     program_id: &Pubkey,
-    oracle_ai: &AccountInfo,
+    oracle_ai: &mut AccountInfo,
     oracle: &mut Oracle,
-    facts: &[AccountInfo],
+    facts: &mut [AccountInfo],
     now: i64,
 ) -> ProgramResult {
-    for (i, f_ai) in facts.iter().enumerate() {
-        require_distinct(&facts[..i], f_ai.key())?;
+    for i in 0..facts.len() {
+        let (prior, rest) = facts.split_at_mut(i);
+        let f_ai = &mut rest[0];
+        require_distinct(prior, f_ai.address())?;
 
         // Owner + size + account_type check, then an owned copy for mutation.
         let mut fact = load_fact(f_ai, program_id)?;
-        if fact.oracle != *oracle_ai.key() {
+        if fact.oracle != *oracle_ai.address() {
             return Err(KassandraError::InvalidAccount.into());
         }
         if fact.is_settled() {
@@ -330,7 +326,7 @@ fn finalize_with_facts(
             .checked_add(1)
             .ok_or(ProgramError::ArithmeticOverflow)?;
 
-        let mut data = f_ai.try_borrow_mut_data()?;
+        let mut data = f_ai.try_borrow_mut()?;
         data[..Fact::LEN].copy_from_slice(bytemuck::bytes_of(&fact));
     }
 
@@ -345,8 +341,8 @@ fn finalize_with_facts(
 }
 
 /// Write the mutated oracle back into its account data.
-fn write_oracle(oracle_ai: &AccountInfo, oracle: &Oracle) -> ProgramResult {
-    let mut data = oracle_ai.try_borrow_mut_data()?;
+fn write_oracle(oracle_ai: &mut AccountInfo, oracle: &Oracle) -> ProgramResult {
+    let mut data = oracle_ai.try_borrow_mut()?;
     data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(oracle));
     Ok(())
 }

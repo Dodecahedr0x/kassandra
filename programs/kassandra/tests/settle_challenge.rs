@@ -46,10 +46,10 @@ const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5x
 const MAX_PRICE: u128 = (u64::MAX as u128) * 1_000_000_000_000;
 
 fn vault_id() -> Pubkey {
-    Pubkey::new_from_array(metadao::CONDITIONAL_VAULT_ID)
+    Pubkey::new_from_array(metadao::CONDITIONAL_VAULT_ID.to_bytes())
 }
 fn amm_id() -> Pubkey {
-    Pubkey::new_from_array(metadao::AMM_ID)
+    Pubkey::new_from_array(metadao::AMM_ID.to_bytes())
 }
 
 fn ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
@@ -62,7 +62,7 @@ fn ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
 
 fn cond_mint(vault: &Pubkey, index: u8) -> Pubkey {
     Pubkey::find_program_address(
-        &metadao::conditional_token_mint_seeds(&vault.to_bytes(), &[index]),
+        &metadao::conditional_token_mint_seeds(&vault.to_bytes().into(), &[index]),
         &vault_id(),
     )
     .0
@@ -166,14 +166,18 @@ fn setup_market(ctx: &mut TestCtx, resolver: Pubkey) -> (MarketAccounts, Pubkey,
     let question_id = [7u8; 32];
 
     let (question, _) = Pubkey::find_program_address(
-        &metadao::question_seeds(&question_id, &resolver_arr, &[num_outcomes]),
+        &metadao::question_seeds(&question_id, &resolver_arr.into(), &[num_outcomes]),
         &vault_id(),
     );
     let question_arr = question.to_bytes();
-    let (kass_vault, _) =
-        Pubkey::find_program_address(&metadao::vault_seeds(&question_arr, &kass_arr), &vault_id());
-    let (usdc_vault, _) =
-        Pubkey::find_program_address(&metadao::vault_seeds(&question_arr, &usdc_arr), &vault_id());
+    let (kass_vault, _) = Pubkey::find_program_address(
+        &metadao::vault_seeds(&question_arr.into(), &kass_arr.into()),
+        &vault_id(),
+    );
+    let (usdc_vault, _) = Pubkey::find_program_address(
+        &metadao::vault_seeds(&question_arr.into(), &usdc_arr.into()),
+        &vault_id(),
+    );
 
     let pass_mint = cond_mint(&kass_vault, 0);
     let fail_mint = cond_mint(&kass_vault, 1);
@@ -195,7 +199,8 @@ fn setup_market(ctx: &mut TestCtx, resolver: Pubkey) -> (MarketAccounts, Pubkey,
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
         ],
-        data: metadao::initialize_question_data(&question_id, &resolver_arr, num_outcomes).to_vec(),
+        data: metadao::initialize_question_data(&question_id, &resolver_arr.into(), num_outcomes)
+            .to_vec(),
     };
     ctx.send_many(&cu(ix_q), &[])
         .expect("initialize_question failed");
@@ -395,8 +400,8 @@ fn seed_ai_claim(ctx: &mut TestCtx, oracle: Pubkey, proposer: Pubkey, option: u8
     );
     let mut c: AiClaim = bytemuck::Zeroable::zeroed();
     c.account_type = AccountType::AiClaim.as_u8();
-    c.oracle = oracle.to_bytes();
-    c.proposer = proposer.to_bytes();
+    c.oracle = oracle.to_bytes().into();
+    c.proposer = proposer.to_bytes().into();
     c.option = option;
     c.challenged = 0;
     c.bump = bump;

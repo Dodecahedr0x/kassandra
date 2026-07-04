@@ -7,7 +7,8 @@
 //! `processor/<name>.rs`.
 
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, error::ProgramError,
+    ProgramResult,
 };
 
 use crate::instruction::Ix;
@@ -35,7 +36,7 @@ pub mod submit_fact;
 pub mod sweep_oracle;
 pub mod vote_fact;
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], data: &[u8]) -> ProgramResult {
     // First byte = discriminant; the rest is the per-instruction payload.
     let (&disc, payload) = data
         .split_first()

@@ -103,11 +103,8 @@
 //! `[b"oracle", nonce_le, bump]` program-sign the InvalidDeadend emission burn.
 
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::Signer,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Signer,
+    error::ProgramError, ProgramResult,
 };
 use pinocchio_token::instructions::Burn;
 
@@ -115,7 +112,9 @@ use crate::{
     clock::{now, require_after_end, require_phase},
     error::KassandraError,
     plurality::{plurality, Plurality},
-    processor::guards::{assert_key, load_oracle, load_proposer, require_distinct, verify_oracle_pda},
+    processor::guards::{
+        assert_key, load_oracle, load_proposer, require_distinct, verify_oracle_pda,
+    },
     state::{Oracle, Phase, CLAIM_OPTION_NONE},
 };
 
@@ -130,7 +129,7 @@ const PAYLOAD_LEN: usize = 8;
 /// config doc + module-level CONTRACT note. Task 13's fuzzer must stay within it.
 const MAX_PROPOSERS: usize = crate::config::MAX_PROPOSERS as usize;
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     let [oracle_ai, rest @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -185,10 +184,10 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     let mut bonds = [0u64; MAX_PROPOSERS];
     let mut n = 0usize;
     for (i, p_ai) in tail.iter().enumerate() {
-        require_distinct(&tail[..i], p_ai.key())?;
+        require_distinct(&tail[..i], p_ai.address())?;
 
         let proposer = load_proposer(p_ai, program_id)?;
-        if proposer.oracle != *oracle_ai.key() {
+        if proposer.oracle != *oracle_ai.address() {
             return Err(KassandraError::InvalidAccount.into());
         }
         if proposer.is_disqualified() {
@@ -265,18 +264,13 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
                 let nonce_le = nonce.to_le_bytes();
                 let bump_seed = [oracle.bump];
                 let seeds = Oracle::signer_seeds(&nonce_le, &bump_seed);
-                Burn {
-                    account: stake_vault_ai,
-                    mint: kass_mint_ai,
-                    authority: oracle_ai,
-                    amount: burn_amount,
-                }
-                .invoke_signed(&[Signer::from(&seeds)])?;
+                Burn::new(stake_vault_ai, kass_mint_ai, oracle_ai, burn_amount)
+                    .invoke_signed(&[Signer::from(&seeds)])?;
             }
         }
     }
 
-    let mut data = oracle_ai.try_borrow_mut_data()?;
+    let mut data = oracle_ai.try_borrow_mut()?;
     data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
     Ok(())
 }

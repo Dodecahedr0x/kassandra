@@ -6,10 +6,13 @@
 //! This lets us read/write them straight out of account data with `bytemuck`.
 
 use bytemuck::{Pod, Zeroable};
-use pinocchio::instruction::Seed;
+use pinocchio::cpi::Seed;
 
-/// 32-byte Solana public key, kept as a plain byte array so it is `Pod`.
-pub type Pubkey = [u8; 32];
+/// 32-byte Solana public key. Aliases pinocchio's `Address` — a
+/// `#[repr(transparent)]` newtype over `[u8; 32]` that is `Pod`/`Zeroable` (via
+/// solana-address's `bytemuck` feature), so the zero-copy account structs below
+/// keep the exact same byte layout while gaining typed key comparisons.
+pub type Pubkey = pinocchio::address::Address;
 
 /// `Proposer.claim_option` sentinel: no AI claim submitted yet.
 pub const CLAIM_OPTION_NONE: u8 = 0xFF;

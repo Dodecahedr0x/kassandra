@@ -31,7 +31,7 @@ fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
 /// The futarchy program id as a `solana_sdk::Pubkey` (the owner a real `Dao`
 /// account carries).
 fn futarchy_owner() -> Pubkey {
-    Pubkey::new_from_array(md6::FUTARCHY_ID)
+    Pubkey::new_from_array(md6::FUTARCHY_ID.to_bytes())
 }
 /// `get_twap` reference math (independent of the program): the expected value a
 /// correct read must return.
@@ -129,7 +129,7 @@ fn non_futarchy_owner_rejected() {
     // The blessed `kass_dao` carries a valid oracle blob, but is owned by the
     // WRONG program (the Kassandra program here). The owner anchor must reject.
     let kass_dao = Pubkey::new_unique();
-    let wrong_owner = Pubkey::new_from_array(kassandra_program::ID);
+    let wrong_owner = Pubkey::new_from_array(kassandra_program::ID.to_bytes());
     ctx.fabricate_owned_account(
         kass_dao,
         wrong_owner,

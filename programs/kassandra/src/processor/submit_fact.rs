@@ -22,12 +22,8 @@
 
 use bytemuck::Zeroable;
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::Seed,
-    program_error::ProgramError,
-    pubkey::{find_program_address, Pubkey},
-    sysvars::{rent::Rent, Sysvar},
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Seed,
+    error::ProgramError, ProgramResult,
 };
 use pinocchio_token::instructions::Transfer;
 
@@ -35,6 +31,7 @@ use crate::{
     clock::{now, require_before_end, require_phase},
     error::KassandraError,
     processor::guards::{assert_key, assert_signer, create_pda, load_oracle},
+    rent::minimum_rent,
     state::{AccountType, Fact, Oracle, Phase},
 };
 
@@ -78,7 +75,7 @@ impl<'a> Args<'a> {
     }
 }
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     let args = Args::parse(payload)?;
 
     // A zero-stake fact would pollute quorum for free; require a positive bond.
@@ -108,10 +105,10 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     require_before_end(&oracle, now()?)?;
 
     // --- fact PDA derivation + duplicate rejection --------------------------
-    let (expected_fact, bump) = find_program_address(
+    let (expected_fact, bump) = Pubkey::find_program_address(
         &[
             b"fact",
-            oracle_ai.key().as_ref(),
+            oracle_ai.address().as_ref(),
             args.content_hash.as_ref(),
         ],
         program_id,
@@ -124,16 +121,16 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // trips this check before the real submitter creates it. The future fix is
     // to allocate via system Allocate + Assign (which tolerates a pre-funded
     // account) instead of CreateAccount; not worth it now.
-    if fact_ai.lamports() != 0 || !fact_ai.data_is_empty() {
+    if fact_ai.lamports() != 0 || !fact_ai.is_data_empty() {
         return Err(KassandraError::DuplicateFact.into());
     }
 
     // --- create the Fact account (program-signed) ---------------------------
-    let rent = Rent::get()?.minimum_balance(Fact::LEN);
+    let rent = minimum_rent(Fact::LEN)?;
     let bump_seed = [bump];
     let signer_seeds = [
         Seed::from(b"fact".as_ref()),
-        Seed::from(oracle_ai.key().as_ref()),
+        Seed::from(oracle_ai.address().as_ref()),
         Seed::from(args.content_hash.as_ref()),
         Seed::from(&bump_seed),
     ];
@@ -147,26 +144,20 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     )?;
 
     // --- escrow the stake into the vault (submitter signs as authority) -----
-    Transfer {
-        from: submitter_kass_ai,
-        to: vault_ai,
-        authority: submitter_ai,
-        amount: args.stake,
-    }
-    .invoke()?;
+    Transfer::new(submitter_kass_ai, vault_ai, submitter_ai, args.stake).invoke()?;
 
     // --- initialize the Fact ------------------------------------------------
     let mut fact = Fact::zeroed();
     fact.account_type = AccountType::Fact.as_u8();
-    fact.oracle = *oracle_ai.key();
-    fact.proposer = *submitter_ai.key();
+    fact.oracle = *oracle_ai.address();
+    fact.proposer = *submitter_ai.address();
     fact.content_hash = *args.content_hash;
     fact.stake = args.stake;
     fact.uri_len = args.uri.len() as u16;
     fact.bump = bump;
     fact.uri[..args.uri.len()].copy_from_slice(args.uri);
     {
-        let mut data = fact_ai.try_borrow_mut_data()?;
+        let mut data = fact_ai.try_borrow_mut()?;
         data.copy_from_slice(bytemuck::bytes_of(&fact));
     }
 
@@ -180,7 +171,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         .checked_add(args.stake)
         .ok_or(ProgramError::ArithmeticOverflow)?;
     {
-        let mut data = oracle_ai.try_borrow_mut_data()?;
+        let mut data = oracle_ai.try_borrow_mut()?;
         data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
     }
 

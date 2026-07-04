@@ -258,7 +258,7 @@ impl TestCtx {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 1_000_000_000_000).unwrap();
 
-        let program_id = Pubkey::new_from_array(kassandra_program::ID);
+        let program_id = Pubkey::new_from_array(kassandra_program::ID.to_bytes());
         svm.add_program(
             program_id,
             include_bytes!("../../../../target/deploy/kassandra_program.so"),
@@ -429,13 +429,13 @@ impl TestCtx {
     /// 0 (`[b"multisig", multisig, b"vault", [0]]`). This is the value the
     /// hardened `set_governance` (Task G1) requires as `dao_authority`.
     pub fn squads_vault_for_dao(dao: &Pubkey) -> Pubkey {
-        let squads_id = Pubkey::new_from_array(md6::SQUADS_V4_ID);
+        let squads_id = Pubkey::new_from_array(md6::SQUADS_V4_ID.to_bytes());
         let dao_arr = dao.to_bytes();
         let (multisig, _) =
-            Pubkey::find_program_address(&md6::squads_multisig_seeds(&dao_arr), &squads_id);
+            Pubkey::find_program_address(&md6::squads_multisig_seeds(&dao_arr.into()), &squads_id);
         let multisig_arr = multisig.to_bytes();
         let (vault, _) = Pubkey::find_program_address(
-            &md6::squads_vault_seeds(&multisig_arr, &[0u8]),
+            &md6::squads_vault_seeds(&multisig_arr.into(), &[0u8]),
             &squads_id,
         );
         vault
@@ -449,7 +449,7 @@ impl TestCtx {
     /// but arbitrary (these accept-path tests don't read the price).
     pub fn fabricate_dao_and_vault(&mut self) -> (Pubkey, Pubkey) {
         let kass_dao = Pubkey::new_unique();
-        let owner = Pubkey::new_from_array(md6::FUTARCHY_ID);
+        let owner = Pubkey::new_from_array(md6::FUTARCHY_ID.to_bytes());
         self.fabricate_owned_account(kass_dao, owner, build_dao_blob(1, 1_000_000, 0, 0));
         let vault = Self::squads_vault_for_dao(&kass_dao);
         (kass_dao, vault)
@@ -467,8 +467,8 @@ impl TestCtx {
     pub fn force_governance(&mut self, dao_authority: Pubkey, kass_dao: Pubkey) -> Pubkey {
         let (protocol_pda, _) = Self::protocol_pda(&self.program_id);
         let mut p = self.protocol(protocol_pda);
-        p.dao_authority = dao_authority.to_bytes();
-        p.kass_dao = kass_dao.to_bytes();
+        p.dao_authority = dao_authority.to_bytes().into();
+        p.kass_dao = kass_dao.to_bytes().into();
         p.governance_set = 1;
         self.set_program_account(protocol_pda, bytemuck::bytes_of(&p).to_vec());
         protocol_pda
@@ -579,7 +579,7 @@ impl TestCtx {
     pub fn bless_kass_price(&mut self) -> Pubkey {
         self.ensure_protocol();
         let kass_dao = Pubkey::new_unique();
-        let owner = Pubkey::new_from_array(md6::FUTARCHY_ID);
+        let owner = Pubkey::new_from_array(md6::FUTARCHY_ID.to_bytes());
         // twap = aggregator / (last_updated - (created_at + start_delay)).
         // Pick a 1_000_000s window so aggregator = twap * 1e6 yields KASS_PRICE_TWAP.
         let last_updated: i64 = 1_000_000;
@@ -875,10 +875,10 @@ impl TestCtx {
         let now = self.now();
         let mut oracle = Oracle::zeroed();
         oracle.account_type = AccountType::Oracle.as_u8();
-        oracle.creator = self.payer.pubkey().to_bytes();
-        oracle.kass_mint = self.kass_mint.to_bytes();
-        oracle.usdc_mint = self.usdc_mint.to_bytes();
-        oracle.stake_vault = stake_vault.to_bytes();
+        oracle.creator = self.payer.pubkey().to_bytes().into();
+        oracle.kass_mint = self.kass_mint.to_bytes().into();
+        oracle.usdc_mint = self.usdc_mint.to_bytes().into();
+        oracle.stake_vault = stake_vault.to_bytes().into();
         oracle.deadline = now;
         oracle.phase_ends_at = now + WINDOW;
         oracle.twap_window = TWAP_WINDOW;
@@ -938,8 +938,8 @@ impl TestCtx {
 
             let mut proposer = Proposer::zeroed();
             proposer.account_type = AccountType::Proposer.as_u8();
-            proposer.oracle = oracle_pda.to_bytes();
-            proposer.authority = authority.pubkey().to_bytes();
+            proposer.oracle = oracle_pda.to_bytes().into();
+            proposer.authority = authority.pubkey().to_bytes().into();
             proposer.bond = spec.bond;
             proposer.original_option = spec.option;
             proposer.claim_option = CLAIM_OPTION_NONE;
@@ -1087,7 +1087,7 @@ impl TestCtx {
     pub fn set_reward_emission(&mut self, oracle: Pubkey, amount: u64) {
         let mut o = self.oracle(oracle);
         o.reward_emission = amount;
-        let vault = Pubkey::new_from_array(o.stake_vault);
+        let vault = Pubkey::new_from_array(o.stake_vault.to_bytes());
         self.set_program_account(oracle, bytemuck::bytes_of(&o).to_vec());
         self.add_token_balance(vault, amount);
         self.add_mint_supply(self.kass_mint, amount);
@@ -1731,10 +1731,10 @@ impl TestCtx {
         let now = self.now();
         let mut oracle = Oracle::zeroed();
         oracle.account_type = AccountType::Oracle.as_u8();
-        oracle.creator = self.payer.pubkey().to_bytes();
-        oracle.kass_mint = self.kass_mint.to_bytes();
-        oracle.usdc_mint = self.usdc_mint.to_bytes();
-        oracle.stake_vault = stake_vault.to_bytes();
+        oracle.creator = self.payer.pubkey().to_bytes().into();
+        oracle.kass_mint = self.kass_mint.to_bytes().into();
+        oracle.usdc_mint = self.usdc_mint.to_bytes().into();
+        oracle.stake_vault = stake_vault.to_bytes().into();
         oracle.deadline = now;
         oracle.phase_ends_at = now;
         oracle.twap_window = TWAP_WINDOW;
@@ -1777,8 +1777,8 @@ impl TestCtx {
 
             let mut acct = Proposer::zeroed();
             acct.account_type = AccountType::Proposer.as_u8();
-            acct.oracle = oracle_pda.to_bytes();
-            acct.authority = authority.pubkey().to_bytes();
+            acct.oracle = oracle_pda.to_bytes().into();
+            acct.authority = authority.pubkey().to_bytes().into();
             acct.bond = p.bond;
             acct.original_option = p.claim_option;
             acct.claim_option = p.claim_option;
@@ -1837,8 +1837,8 @@ impl TestCtx {
 
             let mut fact = Fact::zeroed();
             fact.account_type = AccountType::Fact.as_u8();
-            fact.oracle = oracle_pda.to_bytes();
-            fact.proposer = submitter_auth.pubkey().to_bytes();
+            fact.oracle = oracle_pda.to_bytes().into();
+            fact.proposer = submitter_auth.pubkey().to_bytes().into();
             fact.stake = f.stake;
             fact.approve_stake = approve_stake;
             fact.duplicate_stake = duplicate_stake;
@@ -1872,8 +1872,8 @@ impl TestCtx {
 
                 let mut vote = FactVote::zeroed();
                 vote.account_type = AccountType::FactVote.as_u8();
-                vote.fact = fact_account.to_bytes();
-                vote.voter = voter.pubkey().to_bytes();
+                vote.fact = fact_account.to_bytes().into();
+                vote.voter = voter.pubkey().to_bytes().into();
                 vote.stake = v.stake;
                 vote.kind = v.kind;
                 let vote_account = self.seed_program_account(bytemuck::bytes_of(&vote).to_vec());
@@ -1952,7 +1952,7 @@ impl TestCtx {
         let mut o = self.oracle(oracle);
         o.reward_emission = amount;
         o.reward_pool += amount;
-        let vault = Pubkey::new_from_array(o.stake_vault);
+        let vault = Pubkey::new_from_array(o.stake_vault.to_bytes());
         self.set_program_account(oracle, bytemuck::bytes_of(&o).to_vec());
         self.add_token_balance(vault, amount);
         self.add_mint_supply(self.kass_mint, amount);
@@ -1976,7 +1976,7 @@ impl TestCtx {
         let mut o = self.oracle(oracle);
         o.bond_pool += slashed_amount;
         o.surviving_count -= 1;
-        let vault = Pubkey::new_from_array(o.stake_vault);
+        let vault = Pubkey::new_from_array(o.stake_vault.to_bytes());
         self.set_program_account(oracle, bytemuck::bytes_of(&o).to_vec());
         // The kass_fee physically left the vault to the challenger at settle time.
         self.sub_token_balance(vault, kass_fee);
@@ -2075,9 +2075,9 @@ impl TestCtx {
     pub fn seed_ai_claim(&mut self, oracle: Pubkey, proposer: Pubkey, authority: Pubkey) -> Pubkey {
         let mut c = AiClaim::zeroed();
         c.account_type = AccountType::AiClaim.as_u8();
-        c.oracle = oracle.to_bytes();
-        c.proposer = proposer.to_bytes();
-        c.authority = authority.to_bytes();
+        c.oracle = oracle.to_bytes().into();
+        c.proposer = proposer.to_bytes().into();
+        c.authority = authority.to_bytes().into();
         self.seed_program_account(bytemuck::bytes_of(&c).to_vec())
     }
 
@@ -2092,9 +2092,9 @@ impl TestCtx {
     ) -> Pubkey {
         let mut m = Market::zeroed();
         m.account_type = AccountType::Market.as_u8();
-        m.oracle = oracle.to_bytes();
-        m.challenger = challenger.to_bytes();
-        m.challenger_usdc_vault = challenger_usdc_vault.to_bytes();
+        m.oracle = oracle.to_bytes().into();
+        m.challenger = challenger.to_bytes().into();
+        m.challenger_usdc_vault = challenger_usdc_vault.to_bytes().into();
         m.settled = settled as u8;
         self.seed_program_account(bytemuck::bytes_of(&m).to_vec())
     }
@@ -2145,7 +2145,7 @@ impl TestCtx {
     /// by transaction fees.
     pub fn set_creator(&mut self, oracle: Pubkey, creator: Pubkey) {
         let mut o = self.oracle(oracle);
-        o.creator = creator.to_bytes();
+        o.creator = creator.to_bytes().into();
         self.set_program_account(oracle, bytemuck::bytes_of(&o).to_vec());
     }
 
@@ -2153,7 +2153,7 @@ impl TestCtx {
     /// supply, mirroring the harness philosophy), modelling the residual dust /
     /// unclaimed principal a terminal vault retains after (or without) claims.
     pub fn fund_vault(&mut self, oracle: Pubkey, amount: u64) {
-        let vault = Pubkey::new_from_array(self.oracle(oracle).stake_vault);
+        let vault = Pubkey::new_from_array(self.oracle(oracle).stake_vault.to_bytes());
         self.add_token_balance(vault, amount);
         self.add_mint_supply(self.kass_mint, amount);
     }

@@ -100,8 +100,8 @@ fn submit_claim_matching_original() {
     let (claim, _) = claim_pda(&ctx.program_id, &oracle, &proposer_pda);
     let c = ctx.ai_claim(claim);
     assert_eq!(c.option, 0);
-    assert_eq!(c.oracle, oracle.to_bytes());
-    assert_eq!(c.proposer, proposer_pda.to_bytes());
+    assert_eq!(c.oracle, oracle.to_bytes().into());
+    assert_eq!(c.proposer, proposer_pda.to_bytes().into());
     assert_eq!(c.challenged, 0);
     assert_eq!(c.model_id, [0xAA; 32]);
     assert_eq!(c.params_hash, [0xBB; 32]);

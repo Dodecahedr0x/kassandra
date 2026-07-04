@@ -138,8 +138,8 @@ fn vote_fact_approve_tallies_and_moves_stake() {
     let v = ctx.fact_vote(fact_vote);
     assert_eq!(v.kind, VOTE_APPROVE);
     assert_eq!(v.stake, stake);
-    assert_eq!(v.fact, fact.to_bytes());
-    assert_eq!(v.voter, voter.pubkey().to_bytes());
+    assert_eq!(v.fact, fact.to_bytes().into());
+    assert_eq!(v.voter, voter.pubkey().to_bytes().into());
 }
 
 #[test]

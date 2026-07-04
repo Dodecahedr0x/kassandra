@@ -27,12 +27,8 @@
 
 use bytemuck::Zeroable;
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::Seed,
-    program_error::ProgramError,
-    pubkey::{find_program_address, Pubkey},
-    sysvars::{rent::Rent, Sysvar},
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Seed,
+    error::ProgramError, ProgramResult,
 };
 use pinocchio_token::instructions::Transfer;
 
@@ -40,6 +36,7 @@ use crate::{
     clock::{now, require_before_end, require_phase},
     error::KassandraError,
     processor::guards::{assert_key, assert_signer, create_pda, load_fact, load_oracle},
+    rent::minimum_rent,
     state::{AccountType, FactVote, Oracle, Phase, VOTE_APPROVE, VOTE_DUPLICATE},
 };
 
@@ -64,7 +61,7 @@ impl Args {
     }
 }
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     let args = Args::parse(payload)?;
 
     // A zero-stake vote would move quorum tallies for free.
@@ -93,28 +90,32 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // --- fact + binding -----------------------------------------------------
     let mut fact = load_fact(fact_ai, program_id)?;
     // The fact must belong to this oracle.
-    if &fact.oracle != oracle_ai.key() {
+    if &fact.oracle != oracle_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
 
     // --- fact_vote PDA derivation + one-vote-per-voter ----------------------
-    let (expected_vote, bump) = find_program_address(
-        &[b"vote", fact_ai.key().as_ref(), voter_ai.key().as_ref()],
+    let (expected_vote, bump) = Pubkey::find_program_address(
+        &[
+            b"vote",
+            fact_ai.address().as_ref(),
+            voter_ai.address().as_ref(),
+        ],
         program_id,
     );
     assert_key(fact_vote_ai, &expected_vote)?;
     // An already-funded/initialized PDA means this voter already voted here.
-    if fact_vote_ai.lamports() != 0 || !fact_vote_ai.data_is_empty() {
+    if fact_vote_ai.lamports() != 0 || !fact_vote_ai.is_data_empty() {
         return Err(KassandraError::DuplicateVote.into());
     }
 
     // --- create the FactVote account (program-signed) -----------------------
-    let rent = Rent::get()?.minimum_balance(FactVote::LEN);
+    let rent = minimum_rent(FactVote::LEN)?;
     let bump_seed = [bump];
     let signer_seeds = [
         Seed::from(b"vote".as_ref()),
-        Seed::from(fact_ai.key().as_ref()),
-        Seed::from(voter_ai.key().as_ref()),
+        Seed::from(fact_ai.address().as_ref()),
+        Seed::from(voter_ai.address().as_ref()),
         Seed::from(&bump_seed),
     ];
     create_pda(
@@ -127,24 +128,18 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     )?;
 
     // --- escrow the stake into the vault (voter signs as authority) ---------
-    Transfer {
-        from: voter_kass_ai,
-        to: vault_ai,
-        authority: voter_ai,
-        amount: args.stake,
-    }
-    .invoke()?;
+    Transfer::new(voter_kass_ai, vault_ai, voter_ai, args.stake).invoke()?;
 
     // --- initialize the FactVote --------------------------------------------
     let mut vote = FactVote::zeroed();
     vote.account_type = AccountType::FactVote.as_u8();
-    vote.fact = *fact_ai.key();
-    vote.voter = *voter_ai.key();
+    vote.fact = *fact_ai.address();
+    vote.voter = *voter_ai.address();
     vote.stake = args.stake;
     vote.kind = args.kind;
     vote.bump = bump;
     {
-        let mut data = fact_vote_ai.try_borrow_mut_data()?;
+        let mut data = fact_vote_ai.try_borrow_mut()?;
         data.copy_from_slice(bytemuck::bytes_of(&vote));
     }
 
@@ -161,7 +156,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
             .ok_or(ProgramError::ArithmeticOverflow)?;
     }
     {
-        let mut data = fact_ai.try_borrow_mut_data()?;
+        let mut data = fact_ai.try_borrow_mut()?;
         data[..crate::state::Fact::LEN].copy_from_slice(bytemuck::bytes_of(&fact));
     }
 
@@ -171,7 +166,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         .checked_add(args.stake)
         .ok_or(ProgramError::ArithmeticOverflow)?;
     {
-        let mut data = oracle_ai.try_borrow_mut_data()?;
+        let mut data = oracle_ai.try_borrow_mut()?;
         data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
     }
 

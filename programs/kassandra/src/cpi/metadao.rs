@@ -37,26 +37,26 @@
 
 #![allow(dead_code)]
 
+use crate::error::KassandraError;
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::{AccountMeta, Instruction, Signer},
-    program_error::ProgramError,
-    pubkey::{find_program_address, Pubkey},
+    account::AccountView as AccountInfo,
+    address::Address as Pubkey,
+    cpi::Signer,
+    error::ProgramError,
+    instruction::{InstructionAccount, InstructionView},
     ProgramResult,
 };
-use pinocchio_pubkey::pubkey;
-
-use crate::error::KassandraError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Program IDs
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// MetaDAO `conditional_vault` v0.4.0 (mainnet-beta).
-pub const CONDITIONAL_VAULT_ID: Pubkey = pubkey!("VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg");
+pub const CONDITIONAL_VAULT_ID: Pubkey =
+    Pubkey::from_str_const("VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg");
 
 /// MetaDAO `amm` v0.4 (mainnet-beta).
-pub const AMM_ID: Pubkey = pubkey!("AMMyu265tkBpRW21iGQxKGLaves3gKm2JcMUqfXNSpqD");
+pub const AMM_ID: Pubkey = Pubkey::from_str_const("AMMyu265tkBpRW21iGQxKGLaves3gKm2JcMUqfXNSpqD");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Anchor instruction discriminators — sha256("global:<name>")[..8]
@@ -234,17 +234,21 @@ pub fn question_seeds<'a>(
     oracle: &'a Pubkey,
     num_outcomes: &'a [u8; 1],
 ) -> [&'a [u8]; 4] {
-    [SEED_QUESTION, question_id, oracle, num_outcomes]
+    [SEED_QUESTION, question_id, oracle.as_ref(), num_outcomes]
 }
 
 /// `ConditionalVault` PDA seeds: `[b"conditional_vault", question, underlying_mint]`.
 pub fn vault_seeds<'a>(question: &'a Pubkey, underlying_mint: &'a Pubkey) -> [&'a [u8]; 3] {
-    [SEED_CONDITIONAL_VAULT, question, underlying_mint]
+    [
+        SEED_CONDITIONAL_VAULT,
+        question.as_ref(),
+        underlying_mint.as_ref(),
+    ]
 }
 
 /// Conditional-token mint PDA seeds: `[b"conditional_token", vault, [index]]`.
 pub fn conditional_token_mint_seeds<'a>(vault: &'a Pubkey, index: &'a [u8; 1]) -> [&'a [u8]; 3] {
-    [SEED_CONDITIONAL_TOKEN, vault, index]
+    [SEED_CONDITIONAL_TOKEN, vault.as_ref(), index]
 }
 
 /// `#[event_cpi]` event-authority PDA seeds: `[b"__event_authority"]`.
@@ -258,7 +262,7 @@ pub fn event_authority_seeds() -> [&'static [u8]; 1] {
 
 /// `Question` PDA: seeds `[b"question", question_id, oracle, [num_outcomes]]`.
 pub fn question_pda(question_id: &[u8; 32], oracle: &Pubkey, num_outcomes: u8) -> (Pubkey, u8) {
-    find_program_address(
+    Pubkey::find_program_address(
         &question_seeds(question_id, oracle, &[num_outcomes]),
         &CONDITIONAL_VAULT_ID,
     )
@@ -266,7 +270,7 @@ pub fn question_pda(question_id: &[u8; 32], oracle: &Pubkey, num_outcomes: u8) -
 
 /// `ConditionalVault` PDA: seeds `[b"conditional_vault", question, underlying_mint]`.
 pub fn vault_pda(question: &Pubkey, underlying_mint: &Pubkey) -> (Pubkey, u8) {
-    find_program_address(
+    Pubkey::find_program_address(
         &vault_seeds(question, underlying_mint),
         &CONDITIONAL_VAULT_ID,
     )
@@ -275,7 +279,7 @@ pub fn vault_pda(question: &Pubkey, underlying_mint: &Pubkey) -> (Pubkey, u8) {
 /// Conditional-token mint PDA for outcome `index`:
 /// seeds `[b"conditional_token", vault, [index]]`.
 pub fn conditional_token_mint_pda(vault: &Pubkey, index: u8) -> (Pubkey, u8) {
-    find_program_address(
+    Pubkey::find_program_address(
         &conditional_token_mint_seeds(vault, &[index]),
         &CONDITIONAL_VAULT_ID,
     )
@@ -288,7 +292,7 @@ pub fn conditional_token_mint_pda(vault: &Pubkey, index: u8) -> (Pubkey, u8) {
 /// program id. Pass [`CONDITIONAL_VAULT_ID`] for vault CPIs, [`AMM_ID`] for AMM
 /// CPIs.
 pub fn event_authority_pda(program_id: &Pubkey) -> (Pubkey, u8) {
-    find_program_address(&event_authority_seeds(), program_id)
+    Pubkey::find_program_address(&event_authority_seeds(), program_id)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -306,7 +310,7 @@ pub fn initialize_question_data(
     let mut out = [0u8; 73];
     out[0..8].copy_from_slice(&INITIALIZE_QUESTION);
     out[8..40].copy_from_slice(question_id);
-    out[40..72].copy_from_slice(oracle);
+    out[40..72].copy_from_slice(oracle.as_ref());
     out[72] = num_outcomes;
     out
 }
@@ -413,31 +417,31 @@ pub fn resolve_question_data_binary(numerators: [u32; 2]) -> [u8; 20] {
 /// matching `AccountInfo`s in the same order. `data` is a discriminator-prefixed
 /// payload from the encoders above. Pass PDA `signers` when our program must
 /// authorize a split/merge of vault-held KASS.
-pub fn invoke_conditional_vault_signed(
+pub fn invoke_conditional_vault_signed<A: AsRef<AccountInfo>>(
     data: &[u8],
-    metas: &[AccountMeta],
-    infos: &[&AccountInfo],
+    metas: &[InstructionAccount],
+    infos: &[A],
     signers: &[Signer],
 ) -> ProgramResult {
-    let ix = Instruction {
+    let ix = InstructionView {
         program_id: &CONDITIONAL_VAULT_ID,
         data,
         accounts: metas,
     };
-    pinocchio::cpi::slice_invoke_signed(&ix, infos, signers)
+    pinocchio::cpi::invoke_signed_with_slice(&ix, infos, signers)
 }
 
 /// Invoke an instruction on the `amm` program (Task 10/11 wiring).
-pub fn invoke_amm_signed(
+pub fn invoke_amm_signed<A: AsRef<AccountInfo>>(
     data: &[u8],
-    metas: &[AccountMeta],
-    infos: &[&AccountInfo],
+    metas: &[InstructionAccount],
+    infos: &[A],
     signers: &[Signer],
 ) -> ProgramResult {
-    let ix = Instruction {
+    let ix = InstructionView {
         program_id: &AMM_ID,
         data,
         accounts: metas,
     };
-    pinocchio::cpi::slice_invoke_signed(&ix, infos, signers)
+    pinocchio::cpi::invoke_signed_with_slice(&ix, infos, signers)
 }

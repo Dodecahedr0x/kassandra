@@ -31,10 +31,10 @@ const AMM_SO: &[u8] = include_bytes!("fixtures/metadao_amm.so");
 const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 fn vault_id() -> Pubkey {
-    Pubkey::new_from_array(metadao::CONDITIONAL_VAULT_ID)
+    Pubkey::new_from_array(metadao::CONDITIONAL_VAULT_ID.to_bytes())
 }
 fn amm_id() -> Pubkey {
-    Pubkey::new_from_array(metadao::AMM_ID)
+    Pubkey::new_from_array(metadao::AMM_ID.to_bytes())
 }
 
 /// Canonical associated token account address for `(owner, mint)`.
@@ -130,7 +130,7 @@ fn seed_helpers_match_documented_layout() {
     let oracle = [3u8; 32];
     let num_outcomes = [2u8; 1];
     assert_eq!(
-        metadao::question_seeds(&question_id, &oracle, &num_outcomes),
+        metadao::question_seeds(&question_id, &oracle.into(), &num_outcomes),
         [
             b"question".as_ref(),
             question_id.as_ref(),
@@ -142,7 +142,7 @@ fn seed_helpers_match_documented_layout() {
     let question = [4u8; 32];
     let mint = [5u8; 32];
     assert_eq!(
-        metadao::vault_seeds(&question, &mint),
+        metadao::vault_seeds(&question.into(), &mint.into()),
         [
             b"conditional_vault".as_ref(),
             question.as_ref(),
@@ -153,7 +153,7 @@ fn seed_helpers_match_documented_layout() {
     let vault = [6u8; 32];
     let index = [1u8; 1];
     assert_eq!(
-        metadao::conditional_token_mint_seeds(&vault, &index),
+        metadao::conditional_token_mint_seeds(&vault.into(), &index),
         [
             b"conditional_token".as_ref(),
             vault.as_ref(),
@@ -223,19 +223,21 @@ fn split_tokens_mints_conditional_tokens() {
     let question_resolver = resolver.to_bytes();
     let kass_arr = kass.to_bytes();
     let (question, _) = Pubkey::find_program_address(
-        &metadao::question_seeds(&question_id, &question_resolver, &[num_outcomes]),
+        &metadao::question_seeds(&question_id, &question_resolver.into(), &[num_outcomes]),
         &vault_id(),
     );
     let question_arr = question.to_bytes();
-    let (vault, _) =
-        Pubkey::find_program_address(&metadao::vault_seeds(&question_arr, &kass_arr), &vault_id());
+    let (vault, _) = Pubkey::find_program_address(
+        &metadao::vault_seeds(&question_arr.into(), &kass_arr.into()),
+        &vault_id(),
+    );
     let vault_arr = vault.to_bytes();
     let (cond0, _) = Pubkey::find_program_address(
-        &metadao::conditional_token_mint_seeds(&vault_arr, &[0u8]),
+        &metadao::conditional_token_mint_seeds(&vault_arr.into(), &[0u8]),
         &vault_id(),
     );
     let (cond1, _) = Pubkey::find_program_address(
-        &metadao::conditional_token_mint_seeds(&vault_arr, &[1u8]),
+        &metadao::conditional_token_mint_seeds(&vault_arr.into(), &[1u8]),
         &vault_id(),
     );
     let (event_authority, _) =
@@ -253,7 +255,8 @@ fn split_tokens_mints_conditional_tokens() {
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
         ],
-        data: metadao::initialize_question_data(&question_id, &resolver_pk, num_outcomes).to_vec(),
+        data: metadao::initialize_question_data(&question_id, &resolver_pk.into(), num_outcomes)
+            .to_vec(),
     };
     send(&mut svm, &payer, &[ix_q]).expect("initialize_question failed");
 

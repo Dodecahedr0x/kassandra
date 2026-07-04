@@ -37,7 +37,8 @@
 //! Empty (after the 1-byte discriminant).
 
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, error::ProgramError,
+    ProgramResult,
 };
 
 use crate::{
@@ -47,7 +48,11 @@ use crate::{
     state::{Oracle, Phase, Proposer, CLAIM_OPTION_NONE},
 };
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -> ProgramResult {
+pub fn process(
+    program_id: &Pubkey,
+    accounts: &mut [AccountInfo],
+    _payload: &[u8],
+) -> ProgramResult {
     let [oracle_ai, tail @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -64,11 +69,13 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
         return Err(KassandraError::IncompleteFactSet.into());
     }
 
-    for (i, p_ai) in tail.iter().enumerate() {
-        require_distinct(&tail[..i], p_ai.key())?;
+    for i in 0..tail.len() {
+        let (prior, rest) = tail.split_at_mut(i);
+        let p_ai = &mut rest[0];
+        require_distinct(prior, p_ai.address())?;
 
         let mut proposer = load_proposer(p_ai, program_id)?;
-        if proposer.oracle != *oracle_ai.key() {
+        if proposer.oracle != *oracle_ai.address() {
             return Err(KassandraError::InvalidAccount.into());
         }
         // Idempotency: each proposer is ai-finalized exactly once.
@@ -113,7 +120,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
             .checked_add(1)
             .ok_or(ProgramError::ArithmeticOverflow)?;
 
-        let mut data = p_ai.try_borrow_mut_data()?;
+        let mut data = p_ai.try_borrow_mut()?;
         data[..Proposer::LEN].copy_from_slice(bytemuck::bytes_of(&proposer));
     }
 
@@ -125,7 +132,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
             .ok_or(ProgramError::ArithmeticOverflow)?;
     }
 
-    let mut data = oracle_ai.try_borrow_mut_data()?;
+    let mut data = oracle_ai.try_borrow_mut()?;
     data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
     Ok(())
 }

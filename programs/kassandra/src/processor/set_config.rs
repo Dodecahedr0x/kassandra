@@ -73,7 +73,8 @@
 //! fees: each `den > 0`, `num <= den`).
 
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, error::ProgramError,
+    ProgramResult,
 };
 
 use crate::{
@@ -99,7 +100,7 @@ fn i64_at(payload: &[u8], i: usize) -> i64 {
     i64::from_le_bytes(payload[off..off + 8].try_into().unwrap())
 }
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     let [protocol_ai, dao_authority_ai, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -212,7 +213,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     protocol.challenge_success_kass_fee_num = challenge_success_kass_fee_num;
     protocol.challenge_success_kass_fee_den = challenge_success_kass_fee_den;
     {
-        let mut data = protocol_ai.try_borrow_mut_data()?;
+        let mut data = protocol_ai.try_borrow_mut()?;
         data[..Protocol::LEN].copy_from_slice(bytemuck::bytes_of(&protocol));
     }
 

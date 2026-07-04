@@ -38,10 +38,10 @@ const AMM_SO: &[u8] = include_bytes!("fixtures/metadao_amm.so");
 const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 fn vault_id() -> Pubkey {
-    Pubkey::new_from_array(metadao::CONDITIONAL_VAULT_ID)
+    Pubkey::new_from_array(metadao::CONDITIONAL_VAULT_ID.to_bytes())
 }
 fn amm_id() -> Pubkey {
-    Pubkey::new_from_array(metadao::AMM_ID)
+    Pubkey::new_from_array(metadao::AMM_ID.to_bytes())
 }
 
 fn ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
@@ -144,30 +144,34 @@ fn setup_market(ctx: &mut TestCtx, resolver: Pubkey) -> (MarketAccounts, Pubkey,
     let question_id = [7u8; 32];
 
     let (question, _) = Pubkey::find_program_address(
-        &metadao::question_seeds(&question_id, &resolver_arr, &[num_outcomes]),
+        &metadao::question_seeds(&question_id, &resolver_arr.into(), &[num_outcomes]),
         &vault_id(),
     );
     let question_arr = question.to_bytes();
-    let (kass_vault, _) =
-        Pubkey::find_program_address(&metadao::vault_seeds(&question_arr, &kass_arr), &vault_id());
-    let (usdc_vault, _) =
-        Pubkey::find_program_address(&metadao::vault_seeds(&question_arr, &usdc_arr), &vault_id());
+    let (kass_vault, _) = Pubkey::find_program_address(
+        &metadao::vault_seeds(&question_arr.into(), &kass_arr.into()),
+        &vault_id(),
+    );
+    let (usdc_vault, _) = Pubkey::find_program_address(
+        &metadao::vault_seeds(&question_arr.into(), &usdc_arr.into()),
+        &vault_id(),
+    );
     let kass_vault_arr = kass_vault.to_bytes();
     let (pass_mint, _) = Pubkey::find_program_address(
-        &metadao::conditional_token_mint_seeds(&kass_vault_arr, &[0u8]),
+        &metadao::conditional_token_mint_seeds(&kass_vault_arr.into(), &[0u8]),
         &vault_id(),
     );
     let (fail_mint, _) = Pubkey::find_program_address(
-        &metadao::conditional_token_mint_seeds(&kass_vault_arr, &[1u8]),
+        &metadao::conditional_token_mint_seeds(&kass_vault_arr.into(), &[1u8]),
         &vault_id(),
     );
     let usdc_vault_arr = usdc_vault.to_bytes();
     let (usdc_pass, _) = Pubkey::find_program_address(
-        &metadao::conditional_token_mint_seeds(&usdc_vault_arr, &[0u8]),
+        &metadao::conditional_token_mint_seeds(&usdc_vault_arr.into(), &[0u8]),
         &vault_id(),
     );
     let (usdc_fail, _) = Pubkey::find_program_address(
-        &metadao::conditional_token_mint_seeds(&usdc_vault_arr, &[1u8]),
+        &metadao::conditional_token_mint_seeds(&usdc_vault_arr.into(), &[1u8]),
         &vault_id(),
     );
     let (event_authority, _) =
@@ -187,7 +191,8 @@ fn setup_market(ctx: &mut TestCtx, resolver: Pubkey) -> (MarketAccounts, Pubkey,
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
         ],
-        data: metadao::initialize_question_data(&question_id, &resolver_arr, num_outcomes).to_vec(),
+        data: metadao::initialize_question_data(&question_id, &resolver_arr.into(), num_outcomes)
+            .to_vec(),
     };
     ctx.send_many(&cu(ix_q), &[])
         .expect("initialize_question failed");
@@ -270,8 +275,8 @@ fn seed_ai_claim(ctx: &mut TestCtx, oracle: Pubkey, proposer: Pubkey, option: u8
     );
     let mut c: AiClaim = bytemuck::Zeroable::zeroed();
     c.account_type = AccountType::AiClaim.as_u8();
-    c.oracle = oracle.to_bytes();
-    c.proposer = proposer.to_bytes();
+    c.oracle = oracle.to_bytes().into();
+    c.proposer = proposer.to_bytes().into();
     c.option = option;
     c.challenged = 0;
     c.bump = bump;
@@ -451,18 +456,24 @@ fn open_challenge_happy_path() {
     // Market PDA created + populated.
     let market: Market = ctx.read_pod(f.market);
     assert_eq!(market.account_type, AccountType::Market.as_u8());
-    assert_eq!(market.oracle, f.oracle.to_bytes());
-    assert_eq!(market.ai_claim, f.ai_claim.to_bytes());
-    assert_eq!(market.proposer, f.proposer.to_bytes());
-    assert_eq!(market.challenger, f.challenger.pubkey().to_bytes());
-    assert_eq!(market.question, f.m.question.to_bytes());
-    assert_eq!(market.kass_vault, f.m.kass_vault.to_bytes());
-    assert_eq!(market.usdc_vault, f.m.usdc_vault.to_bytes());
-    assert_eq!(market.pass_amm, f.m.pass_amm.to_bytes());
-    assert_eq!(market.fail_amm, f.m.fail_amm.to_bytes());
-    assert_eq!(market.oracle_pass_kass, f.oracle_pass_kass.to_bytes());
-    assert_eq!(market.oracle_fail_kass, f.oracle_fail_kass.to_bytes());
-    assert_eq!(market.challenger_usdc_vault, escrow_vault.to_bytes());
+    assert_eq!(market.oracle, f.oracle.to_bytes().into());
+    assert_eq!(market.ai_claim, f.ai_claim.to_bytes().into());
+    assert_eq!(market.proposer, f.proposer.to_bytes().into());
+    assert_eq!(market.challenger, f.challenger.pubkey().to_bytes().into());
+    assert_eq!(market.question, f.m.question.to_bytes().into());
+    assert_eq!(market.kass_vault, f.m.kass_vault.to_bytes().into());
+    assert_eq!(market.usdc_vault, f.m.usdc_vault.to_bytes().into());
+    assert_eq!(market.pass_amm, f.m.pass_amm.to_bytes().into());
+    assert_eq!(market.fail_amm, f.m.fail_amm.to_bytes().into());
+    assert_eq!(
+        market.oracle_pass_kass,
+        f.oracle_pass_kass.to_bytes().into()
+    );
+    assert_eq!(
+        market.oracle_fail_kass,
+        f.oracle_fail_kass.to_bytes().into()
+    );
+    assert_eq!(market.challenger_usdc_vault, escrow_vault.to_bytes().into());
     assert_eq!(market.twap_end, now_before + TWAP_WINDOW);
     assert_eq!(market.settled, 0);
 

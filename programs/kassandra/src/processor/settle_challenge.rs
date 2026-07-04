@@ -108,11 +108,8 @@
 //! verified by re-derivation (same scheme as `open_challenge`).
 
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::{AccountMeta, Signer},
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Signer,
+    error::ProgramError, instruction::InstructionAccount, ProgramResult,
 };
 use pinocchio_token::instructions::Transfer;
 
@@ -129,7 +126,6 @@ use crate::{
 
 /// Exact payload length: `oracle_nonce[8]`.
 const PAYLOAD_LEN: usize = 8;
-
 
 /// `value × num / den` in u128, checked back into `u64`. `den == 0` (a malformed
 /// fee config) is rejected as [`KassandraError::InvalidConfig`]. Used for both
@@ -156,7 +152,7 @@ fn verify_and_read_twap(
     expected_quote: &Pubkey,
 ) -> Result<u128, ProgramError> {
     assert_owned_by_program(amm, &metadao::AMM_ID)?;
-    let data = amm.try_borrow_data()?;
+    let data = amm.try_borrow()?;
     if data.len() < metadao::AMM_MIN_LEN {
         return Err(KassandraError::InvalidAccount.into());
     }
@@ -188,7 +184,7 @@ fn verify_and_read_twap(
     Ok(aggregator / slots as u128)
 }
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     if payload.len() != PAYLOAD_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -217,13 +213,13 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         return Err(KassandraError::InvalidAccount.into());
     }
     let mut market: Market = {
-        let data = market_ai.try_borrow_data()?;
+        let data = market_ai.try_borrow()?;
         bytemuck::pod_read_unaligned::<Market>(&data[..Market::LEN])
     };
     if market.account_type != crate::state::AccountType::Market.as_u8() {
         return Err(KassandraError::InvalidAccount.into());
     }
-    if market.oracle != *oracle_ai.key() {
+    if market.oracle != *oracle_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
     if market.is_settled() {
@@ -243,7 +239,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     assert_key(pass_amm_ai, &market.pass_amm)?;
     assert_key(fail_amm_ai, &market.fail_amm)?;
     // A challenger must not be able to alias the two pools.
-    if pass_amm_ai.key() == fail_amm_ai.key() {
+    if pass_amm_ai.address() == fail_amm_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
 
@@ -258,11 +254,11 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
 
     // --- claim + proposer ---------------------------------------------------
     let ai_claim = load_ai_claim(ai_claim_ai, program_id)?;
-    if ai_claim.oracle != *oracle_ai.key() || ai_claim.proposer != *proposer_ai.key() {
+    if ai_claim.oracle != *oracle_ai.address() || ai_claim.proposer != *proposer_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
     let mut proposer = load_proposer(proposer_ai, program_id)?;
-    if proposer.oracle != *oracle_ai.key() {
+    if proposer.oracle != *oracle_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
 
@@ -283,10 +279,10 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // records (the same ATA the bond was split into at open_challenge).
     assert_owned_by_program(kass_vault_ai, &metadao::CONDITIONAL_VAULT_ID)?;
     {
-        let data = kass_vault_ai.try_borrow_data()?;
+        let data = kass_vault_ai.try_borrow()?;
         let v_underlying_acct =
             metadao::read_pubkey(&data, metadao::VAULT_UNDERLYING_ACCOUNT_OFFSET)?;
-        if &v_underlying_acct != kass_vault_underlying_ai.key() {
+        if &v_underlying_acct != kass_vault_underlying_ai.address() {
             return Err(KassandraError::InvalidAccount.into());
         }
     }
@@ -378,12 +374,12 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
 
     let resolve_data = metadao::resolve_question_data_binary(numerators);
     let resolve_metas = [
-        AccountMeta::writable(question_ai.key()),
-        AccountMeta::readonly_signer(oracle_ai.key()),
-        AccountMeta::readonly(cv_event_auth_ai.key()),
-        AccountMeta::readonly(cv_prog_ai.key()),
+        InstructionAccount::writable(question_ai.address()),
+        InstructionAccount::readonly_signer(oracle_ai.address()),
+        InstructionAccount::readonly(cv_event_auth_ai.address()),
+        InstructionAccount::readonly(cv_prog_ai.address()),
     ];
-    let resolve_infos = [question_ai, oracle_ai, cv_event_auth_ai, cv_prog_ai];
+    let resolve_infos = [&*question_ai, &*oracle_ai, &*cv_event_auth_ai, &*cv_prog_ai];
     let nonce_le = oracle_nonce.to_le_bytes();
     let bump_seed = [oracle.bump];
     let oracle_seeds = Oracle::signer_seeds(&nonce_le, &bump_seed);
@@ -404,32 +400,32 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // side → 0 — the FULL `bond` KASS the proposer split lands in `stake_vault`.
     let redeem_data = metadao::redeem_tokens_data();
     let redeem_metas = [
-        AccountMeta::readonly(question_ai.key()),
-        AccountMeta::writable(kass_vault_ai.key()),
-        AccountMeta::writable(kass_vault_underlying_ai.key()),
-        AccountMeta::readonly_signer(oracle_ai.key()), // authority (oracle PDA)
-        AccountMeta::writable(stake_vault_ai.key()),   // user_underlying (dest)
-        AccountMeta::readonly(token_prog_ai.key()),
-        AccountMeta::readonly(cv_event_auth_ai.key()),
-        AccountMeta::readonly(cv_prog_ai.key()),
-        AccountMeta::writable(pass_kass_mint_ai.key()),
-        AccountMeta::writable(fail_kass_mint_ai.key()),
-        AccountMeta::writable(oracle_pass_kass_ai.key()),
-        AccountMeta::writable(oracle_fail_kass_ai.key()),
+        InstructionAccount::readonly(question_ai.address()),
+        InstructionAccount::writable(kass_vault_ai.address()),
+        InstructionAccount::writable(kass_vault_underlying_ai.address()),
+        InstructionAccount::readonly_signer(oracle_ai.address()), // authority (oracle PDA)
+        InstructionAccount::writable(stake_vault_ai.address()),   // user_underlying (dest)
+        InstructionAccount::readonly(token_prog_ai.address()),
+        InstructionAccount::readonly(cv_event_auth_ai.address()),
+        InstructionAccount::readonly(cv_prog_ai.address()),
+        InstructionAccount::writable(pass_kass_mint_ai.address()),
+        InstructionAccount::writable(fail_kass_mint_ai.address()),
+        InstructionAccount::writable(oracle_pass_kass_ai.address()),
+        InstructionAccount::writable(oracle_fail_kass_ai.address()),
     ];
     let redeem_infos = [
-        question_ai,
-        kass_vault_ai,
-        kass_vault_underlying_ai,
-        oracle_ai,
-        stake_vault_ai,
-        token_prog_ai,
-        cv_event_auth_ai,
-        cv_prog_ai,
-        pass_kass_mint_ai,
-        fail_kass_mint_ai,
-        oracle_pass_kass_ai,
-        oracle_fail_kass_ai,
+        &*question_ai,
+        &*kass_vault_ai,
+        &*kass_vault_underlying_ai,
+        &*oracle_ai,
+        &*stake_vault_ai,
+        &*token_prog_ai,
+        &*cv_event_auth_ai,
+        &*cv_prog_ai,
+        &*pass_kass_mint_ai,
+        &*fail_kass_mint_ai,
+        &*oracle_pass_kass_ai,
+        &*oracle_fail_kass_ai,
     ];
     metadao::invoke_conditional_vault_signed(
         &redeem_data,
@@ -444,21 +440,16 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         // Successful challenge: KASS fee carved out of the (now-redeemed) bond in
         // stake_vault → challenger; full USDC escrow returned to the challenger.
         if kass_fee > 0 {
-            Transfer {
-                from: stake_vault_ai,
-                to: challenger_kass_ai,
-                authority: oracle_ai,
-                amount: kass_fee,
-            }
-            .invoke_signed(&[Signer::from(&oracle_seeds)])?;
+            Transfer::new(stake_vault_ai, challenger_kass_ai, oracle_ai, kass_fee)
+                .invoke_signed(&[Signer::from(&oracle_seeds)])?;
         }
         if challenger_usdc > 0 {
-            Transfer {
-                from: escrow_vault_ai,
-                to: challenger_usdc_dest_ai,
-                authority: oracle_ai,
-                amount: challenger_usdc,
-            }
+            Transfer::new(
+                escrow_vault_ai,
+                challenger_usdc_dest_ai,
+                oracle_ai,
+                challenger_usdc,
+            )
             .invoke_signed(&[Signer::from(&oracle_seeds)])?;
         }
     } else {
@@ -474,21 +465,16 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
             .checked_sub(usdc_fee)
             .ok_or(ProgramError::ArithmeticOverflow)?;
         if usdc_fee > 0 {
-            Transfer {
-                from: escrow_vault_ai,
-                to: proposer_usdc_ai,
-                authority: oracle_ai,
-                amount: usdc_fee,
-            }
-            .invoke_signed(&[Signer::from(&oracle_seeds)])?;
+            Transfer::new(escrow_vault_ai, proposer_usdc_ai, oracle_ai, usdc_fee)
+                .invoke_signed(&[Signer::from(&oracle_seeds)])?;
         }
         if challenger_return > 0 {
-            Transfer {
-                from: escrow_vault_ai,
-                to: challenger_usdc_dest_ai,
-                authority: oracle_ai,
-                amount: challenger_return,
-            }
+            Transfer::new(
+                escrow_vault_ai,
+                challenger_usdc_dest_ai,
+                oracle_ai,
+                challenger_return,
+            )
             .invoke_signed(&[Signer::from(&oracle_seeds)])?;
         }
     }
@@ -502,15 +488,15 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         .checked_sub(1)
         .ok_or(ProgramError::ArithmeticOverflow)?;
     {
-        let mut data = market_ai.try_borrow_mut_data()?;
+        let mut data = market_ai.try_borrow_mut()?;
         data[..Market::LEN].copy_from_slice(bytemuck::bytes_of(&market));
     }
     {
-        let mut data = proposer_ai.try_borrow_mut_data()?;
+        let mut data = proposer_ai.try_borrow_mut()?;
         data[..crate::state::Proposer::LEN].copy_from_slice(bytemuck::bytes_of(&proposer));
     }
     {
-        let mut data = oracle_ai.try_borrow_mut_data()?;
+        let mut data = oracle_ai.try_borrow_mut()?;
         data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
     }
 

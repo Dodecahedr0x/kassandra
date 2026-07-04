@@ -29,9 +29,9 @@ fn init_once_records_admin_and_mints() {
 
     let p = ctx.protocol(protocol_pda);
     assert_eq!(p.account_type, AccountType::Protocol.as_u8());
-    assert_eq!(p.admin, ctx.payer.pubkey().to_bytes());
-    assert_eq!(p.kass_mint, ctx.kass_mint.to_bytes());
-    assert_eq!(p.usdc_mint, ctx.usdc_mint.to_bytes());
+    assert_eq!(p.admin, ctx.payer.pubkey().to_bytes().into());
+    assert_eq!(p.kass_mint, ctx.kass_mint.to_bytes().into());
+    assert_eq!(p.usdc_mint, ctx.usdc_mint.to_bytes().into());
     assert_eq!(p.fee_ema, 0);
     assert_eq!(p.last_creation_unix, 0);
 }
@@ -68,9 +68,9 @@ fn prefunded_pda_is_adopted() {
 
     let p = ctx.protocol(protocol_pda);
     assert_eq!(p.account_type, AccountType::Protocol.as_u8());
-    assert_eq!(p.admin, ctx.payer.pubkey().to_bytes());
-    assert_eq!(p.kass_mint, ctx.kass_mint.to_bytes());
-    assert_eq!(p.usdc_mint, ctx.usdc_mint.to_bytes());
+    assert_eq!(p.admin, ctx.payer.pubkey().to_bytes().into());
+    assert_eq!(p.kass_mint, ctx.kass_mint.to_bytes().into());
+    assert_eq!(p.usdc_mint, ctx.usdc_mint.to_bytes().into());
     assert_eq!(p.fee_ema, 0);
 
     // Double-init still fails (now via the account_type tag, not lamports).

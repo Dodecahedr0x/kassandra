@@ -50,7 +50,8 @@
 //! Empty (after the 1-byte discriminant).
 
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, error::ProgramError,
+    ProgramResult,
 };
 
 use crate::{
@@ -66,7 +67,11 @@ use crate::{
 /// `finalize_oracle`'s backstop against an oversized, unfinalizable set.
 const MAX_PROPOSERS: usize = crate::config::MAX_PROPOSERS as usize;
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -> ProgramResult {
+pub fn process(
+    program_id: &Pubkey,
+    accounts: &mut [AccountInfo],
+    _payload: &[u8],
+) -> ProgramResult {
     let [oracle_ai, tail @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -100,10 +105,10 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
     let mut first_option: Option<u8> = None;
     let mut all_agree = true;
     for (i, p_ai) in tail.iter().enumerate() {
-        require_distinct(&tail[..i], p_ai.key())?;
+        require_distinct(&tail[..i], p_ai.address())?;
 
         let proposer = load_proposer(p_ai, program_id)?;
-        if proposer.oracle != *oracle_ai.key() {
+        if proposer.oracle != *oracle_ai.address() {
             return Err(KassandraError::InvalidAccount.into());
         }
         match first_option {
@@ -135,7 +140,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
             .ok_or(ProgramError::ArithmeticOverflow)?;
     }
 
-    let mut data = oracle_ai.try_borrow_mut_data()?;
+    let mut data = oracle_ai.try_borrow_mut()?;
     data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
     Ok(())
 }

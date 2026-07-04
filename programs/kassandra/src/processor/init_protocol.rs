@@ -36,11 +36,10 @@
 
 use bytemuck::Zeroable;
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::{Seed, Signer},
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    sysvars::{rent::Rent, Sysvar},
+    account::AccountView as AccountInfo,
+    address::Address as Pubkey,
+    cpi::{Seed, Signer},
+    error::ProgramError,
     ProgramResult,
 };
 use pinocchio_system::instructions::{Allocate, Assign, Transfer};
@@ -48,10 +47,15 @@ use pinocchio_system::instructions::{Allocate, Assign, Transfer};
 use crate::{
     error::KassandraError,
     processor::guards::{assert_key, assert_signer, PROTOCOL_BUMP, PROTOCOL_PDA},
+    rent::minimum_rent,
     state::{AccountType, Protocol},
 };
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -> ProgramResult {
+pub fn process(
+    program_id: &Pubkey,
+    accounts: &mut [AccountInfo],
+    _payload: &[u8],
+) -> ProgramResult {
     let [protocol_ai, admin_ai, kass_mint_ai, usdc_mint_ai, system_prog_ai, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -69,8 +73,8 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
     // init finds the account already owned by this program AND stamped
     // `Protocol`. A freshly-created or attacker-pre-funded-but-system-owned
     // account is not yet program-owned, so adoption below proceeds.
-    if protocol_ai.is_owned_by(program_id) {
-        let data = protocol_ai.try_borrow_data()?;
+    if protocol_ai.owned_by(program_id) {
+        let data = protocol_ai.try_borrow()?;
         if data.len() >= Protocol::LEN && data[0] == AccountType::Protocol.as_u8() {
             return Err(KassandraError::AlreadyInitialized.into());
         }
@@ -78,14 +82,13 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
 
     // Cheap defense-in-depth: the recorded mints must be SPL token-program
     // accounts (not arbitrary keys), so H1/H2 can trust them as canonical mints.
-    if !kass_mint_ai.is_owned_by(&pinocchio_token::ID)
-        || !usdc_mint_ai.is_owned_by(&pinocchio_token::ID)
+    if !kass_mint_ai.owned_by(&pinocchio_token::ID) || !usdc_mint_ai.owned_by(&pinocchio_token::ID)
     {
         return Err(KassandraError::InvalidAccount.into());
     }
 
     // --- create-or-adopt the Protocol account (program-signed) --------------
-    let rent = Rent::get()?.minimum_balance(Protocol::LEN);
+    let rent = minimum_rent(Protocol::LEN)?;
     let bump_seed = [bump];
     let signer_seeds = [Seed::from(b"protocol".as_ref()), Seed::from(&bump_seed)];
 
@@ -115,9 +118,9 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
     // --- initialize the Protocol --------------------------------------------
     let mut protocol = Protocol::zeroed();
     protocol.account_type = AccountType::Protocol.as_u8();
-    protocol.admin = *admin_ai.key();
-    protocol.kass_mint = *kass_mint_ai.key();
-    protocol.usdc_mint = *usdc_mint_ai.key();
+    protocol.admin = *admin_ai.address();
+    protocol.kass_mint = *kass_mint_ai.address();
+    protocol.usdc_mint = *usdc_mint_ai.address();
     protocol.fee_ema = 0;
     protocol.last_creation_unix = 0;
     protocol.bump = bump;
@@ -163,7 +166,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
     protocol.challenge_success_kass_fee_num = crate::config::CHALLENGE_SUCCESS_KASS_FEE_NUM;
     protocol.challenge_success_kass_fee_den = crate::config::CHALLENGE_SUCCESS_KASS_FEE_DEN;
     {
-        let mut data = protocol_ai.try_borrow_mut_data()?;
+        let mut data = protocol_ai.try_borrow_mut()?;
         data.copy_from_slice(bytemuck::bytes_of(&protocol));
     }
 

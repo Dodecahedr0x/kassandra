@@ -3,10 +3,9 @@ resolver = "2"
 members = ["programs/kassandra", "runner", "sdk-rs"]
 
 [workspace.dependencies]
-pinocchio = "0.8"
-pinocchio-pubkey = "0.2"
-pinocchio-system = "0.2"
-pinocchio-token = "0.3"
+pinocchio = "0.11.2"
+pinocchio-system = "0.6"
+pinocchio-token = "0.6"
 bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
 
 [profile.release]

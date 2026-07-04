@@ -68,22 +68,18 @@
 //! `close_market` / `finalize_oracle`.
 
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::Signer,
-    program_error::ProgramError,
-    pubkey::{find_program_address, Pubkey},
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Signer,
+    error::ProgramError, ProgramResult,
 };
-use pinocchio_pubkey::pubkey;
 use pinocchio_token::instructions::{CloseAccount, Transfer};
-use pinocchio_token::state::TokenAccount;
+use pinocchio_token::state::Account as TokenAccount;
 
 use crate::{
     clock::now,
     config::SWEEP_GRACE,
     error::KassandraError,
     processor::guards::{
-        assert_key, load_oracle, load_protocol, require_terminal, verify_oracle_pda,
+        assert_key, drain_lamports, load_oracle, load_protocol, require_terminal, verify_oracle_pda,
     },
     state::Oracle,
 };
@@ -91,13 +87,13 @@ use crate::{
 /// Exact payload length: `oracle_nonce[8]`.
 const PAYLOAD_LEN: usize = 8;
 
-
 /// SPL Associated Token Account program id. The DAO treasury is the canonical
 /// KASS ATA of `dao_authority`, derived under this program from the standard
 /// seeds `[owner, TOKEN_PROGRAM, mint]`.
-const ATA_PROGRAM_ID: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const ATA_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     if payload.len() != PAYLOAD_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -137,7 +133,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     if !protocol.is_governance_set() {
         return Err(KassandraError::GovernanceNotSet.into());
     }
-    let (treasury, _) = find_program_address(
+    let (treasury, _) = Pubkey::find_program_address(
         &[
             protocol.dao_authority.as_ref(),
             pinocchio_token::ID.as_ref(),
@@ -145,12 +141,12 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         ],
         &ATA_PROGRAM_ID,
     );
-    if dao_treasury_ai.key() != &treasury {
+    if dao_treasury_ai.address() != &treasury {
         return Err(KassandraError::InvalidTreasury.into());
     }
 
     // Read the residual vault balance from the canonical SPL token account.
-    let amount = TokenAccount::from_account_info(stake_vault_ai)
+    let amount = TokenAccount::from_account_view(stake_vault_ai)
         .map_err(|_| KassandraError::InvalidAccount)?
         .amount();
 
@@ -163,33 +159,17 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // 1. Sweep the ENTIRE residual balance → treasury (dust, or a no-show's
     //    forfeited principal). A zero balance is a no-op.
     if amount > 0 {
-        Transfer {
-            from: stake_vault_ai,
-            to: dao_treasury_ai,
-            authority: oracle_ai,
-            amount,
-        }
-        .invoke_signed(&[Signer::from(&seeds)])?;
+        Transfer::new(stake_vault_ai, dao_treasury_ai, oracle_ai, amount)
+            .invoke_signed(&[Signer::from(&seeds)])?;
     }
 
     // 2. Close the now-empty vault via SPL CloseAccount, oracle-PDA signed. Rent
     //    → creator. SPL requires a zero balance, which step 1 guarantees.
-    CloseAccount {
-        account: stake_vault_ai,
-        destination: creator_ai,
-        authority: oracle_ai,
-    }
-    .invoke_signed(&[Signer::from(&seeds)])?;
+    CloseAccount::new(stake_vault_ai, creator_ai, oracle_ai)
+        .invoke_signed(&[Signer::from(&seeds)])?;
 
     // 3. Close the Oracle PDA: drain its rent lamports → creator, then zero it.
     //    Idempotent by closure.
-    {
-        let mut from = oracle_ai.try_borrow_mut_lamports()?;
-        let mut to = creator_ai.try_borrow_mut_lamports()?;
-        *to = to
-            .checked_add(*from)
-            .ok_or(ProgramError::ArithmeticOverflow)?;
-        *from = 0;
-    }
+    drain_lamports(oracle_ai, creator_ai)?;
     oracle_ai.close()
 }

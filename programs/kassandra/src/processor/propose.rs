@@ -34,12 +34,8 @@
 
 use bytemuck::Zeroable;
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::Seed,
-    program_error::ProgramError,
-    pubkey::{find_program_address, Pubkey},
-    sysvars::{rent::Rent, Sysvar},
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Seed,
+    error::ProgramError, ProgramResult,
 };
 use pinocchio_token::instructions::Transfer;
 
@@ -48,13 +44,14 @@ use crate::{
     config::MAX_PROPOSERS,
     error::KassandraError,
     processor::guards::{assert_key, assert_signer, create_pda, load_oracle},
+    rent::minimum_rent,
     state::{AccountType, Oracle, Phase, Proposer, CLAIM_OPTION_NONE},
 };
 
 /// Exact payload length: `option[1] ++ bond[8]`.
 const PAYLOAD_LEN: usize = 9;
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     // --- payload parse (exact length) --------------------------------------
     if payload.len() != PAYLOAD_LEN {
         return Err(ProgramError::InvalidInstructionData);
@@ -114,11 +111,11 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     }
 
     // --- proposer PDA derivation + duplicate rejection ---------------------
-    let (expected_proposer, bump) = find_program_address(
+    let (expected_proposer, bump) = Pubkey::find_program_address(
         &[
             b"proposer",
-            oracle_ai.key().as_ref(),
-            authority_ai.key().as_ref(),
+            oracle_ai.address().as_ref(),
+            authority_ai.address().as_ref(),
         ],
         program_id,
     );
@@ -132,7 +129,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // known authority (not an arbitrary content_hash). The future fix is to
     // allocate via system Allocate + Assign (which tolerates a pre-funded
     // account) instead of CreateAccount; not worth it now.
-    if proposer_ai.lamports() != 0 || !proposer_ai.data_is_empty() {
+    if proposer_ai.lamports() != 0 || !proposer_ai.is_data_empty() {
         return Err(KassandraError::DuplicateProposer.into());
     }
 
@@ -140,11 +137,11 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // canonical mint. The SPL Transfer additionally proves the authority
     // (signer) owns/delegates it.
     {
-        let data = authority_kass_ai.try_borrow_data()?;
+        let data = authority_kass_ai.try_borrow()?;
         if data.len() < 32 {
             return Err(KassandraError::InvalidAccount.into());
         }
-        if data[0..32] != oracle.kass_mint {
+        if data[0..32] != oracle.kass_mint.to_bytes() {
             return Err(KassandraError::InvalidAccount.into());
         }
     }
@@ -153,21 +150,15 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // NOTE: this does Transfer-then-create_pda, the reverse of submit_fact's
     // create_pda-then-Transfer. The divergence is insignificant — both run in
     // one atomic instruction, so either order fully reverts on any failure.
-    Transfer {
-        from: authority_kass_ai,
-        to: vault_ai,
-        authority: authority_ai,
-        amount: bond,
-    }
-    .invoke()?;
+    Transfer::new(authority_kass_ai, vault_ai, authority_ai, bond).invoke()?;
 
     // --- create the Proposer account (program-signed) -----------------------
-    let rent = Rent::get()?.minimum_balance(Proposer::LEN);
+    let rent = minimum_rent(Proposer::LEN)?;
     let bump_seed = [bump];
     let signer_seeds = [
         Seed::from(b"proposer".as_ref()),
-        Seed::from(oracle_ai.key().as_ref()),
-        Seed::from(authority_ai.key().as_ref()),
+        Seed::from(oracle_ai.address().as_ref()),
+        Seed::from(authority_ai.address().as_ref()),
         Seed::from(&bump_seed),
     ];
     create_pda(
@@ -182,8 +173,8 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     // --- initialize the Proposer --------------------------------------------
     let mut proposer = Proposer::zeroed();
     proposer.account_type = AccountType::Proposer.as_u8();
-    proposer.oracle = *oracle_ai.key();
-    proposer.authority = *authority_ai.key();
+    proposer.oracle = *oracle_ai.address();
+    proposer.authority = *authority_ai.address();
     proposer.bond = bond;
     proposer.original_option = option;
     // CONTRACT: not yet AI-claimed — must be the loud sentinel, NOT zero.
@@ -195,7 +186,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
     proposer.ai_finalized = 0;
     proposer.slashed_amount = 0;
     {
-        let mut data = proposer_ai.try_borrow_mut_data()?;
+        let mut data = proposer_ai.try_borrow_mut()?;
         data.copy_from_slice(bytemuck::bytes_of(&proposer));
     }
 
@@ -213,7 +204,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
         .checked_add(bond)
         .ok_or(ProgramError::ArithmeticOverflow)?;
     {
-        let mut data = oracle_ai.try_borrow_mut_data()?;
+        let mut data = oracle_ai.try_borrow_mut()?;
         data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
     }
 

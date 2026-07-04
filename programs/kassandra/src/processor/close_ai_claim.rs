@@ -29,15 +29,16 @@
 //! the close is a pure lamport drain on a program-owned account.
 
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, error::ProgramError,
+    ProgramResult,
 };
 
 use crate::{
     error::KassandraError,
-    processor::guards::{assert_key, load_ai_claim, load_oracle, require_terminal},
+    processor::guards::{assert_key, drain_lamports, load_ai_claim, load_oracle, require_terminal},
 };
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Pubkey, accounts: &mut [AccountInfo], payload: &[u8]) -> ProgramResult {
     if !payload.is_empty() {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -52,20 +53,13 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) ->
 
     // Bind the AiClaim to this oracle; pay rent to its stamped authority.
     let ai_claim = load_ai_claim(ai_claim_ai, program_id)?;
-    if &ai_claim.oracle != oracle_ai.key() {
+    if &ai_claim.oracle != oracle_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
     assert_key(rent_recipient_ai, &ai_claim.authority)?;
 
     // Drain rent lamports → recipient, then zero the account (data / lamports /
     // owner). Idempotent: a second call finds it reaped.
-    {
-        let mut from = ai_claim_ai.try_borrow_mut_lamports()?;
-        let mut to = rent_recipient_ai.try_borrow_mut_lamports()?;
-        *to = to
-            .checked_add(*from)
-            .ok_or(ProgramError::ArithmeticOverflow)?;
-        *from = 0;
-    }
+    drain_lamports(ai_claim_ai, rent_recipient_ai)?;
     ai_claim_ai.close()
 }

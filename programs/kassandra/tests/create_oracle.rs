@@ -41,9 +41,9 @@ fn create_oracle_happy_path() {
     let o = ctx.oracle(oracle_pda);
     assert_eq!(o.account_type, AccountType::Oracle.as_u8());
     assert_eq!(o.phase, Phase::Proposal.as_u8());
-    assert_eq!(o.creator, ctx.payer.pubkey().to_bytes());
-    assert_eq!(o.kass_mint, ctx.kass_mint.to_bytes());
-    assert_eq!(o.usdc_mint, ctx.usdc_mint.to_bytes());
+    assert_eq!(o.creator, ctx.payer.pubkey().to_bytes().into());
+    assert_eq!(o.kass_mint, ctx.kass_mint.to_bytes().into());
+    assert_eq!(o.usdc_mint, ctx.usdc_mint.to_bytes().into());
     assert_eq!(o.deadline, deadline);
     assert_eq!(o.phase_ends_at, deadline + PROPOSAL_WINDOW);
     assert_eq!(o.twap_window, twap_window);
@@ -61,7 +61,7 @@ fn create_oracle_happy_path() {
 
     // The stake vault is a KASS token account, authority == oracle PDA, empty.
     let (vault_pda, _) = TestCtx::stake_vault_pda(&ctx.program_id, &oracle_pda);
-    assert_eq!(o.stake_vault, vault_pda.to_bytes());
+    assert_eq!(o.stake_vault, vault_pda.to_bytes().into());
     let (mint, owner, amount) = ctx.token_account(vault_pda);
     assert_eq!(mint, ctx.kass_mint.to_bytes());
     assert_eq!(owner, oracle_pda.to_bytes());

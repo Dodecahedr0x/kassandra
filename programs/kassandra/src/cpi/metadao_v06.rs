@@ -62,16 +62,15 @@
 
 #![allow(dead_code)]
 
+use crate::error::KassandraError;
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::{AccountMeta, Instruction, Signer},
-    program_error::ProgramError,
-    pubkey::{find_program_address, Pubkey},
+    account::AccountView as AccountInfo,
+    address::Address as Pubkey,
+    cpi::Signer,
+    error::ProgramError,
+    instruction::{InstructionAccount, InstructionView},
     ProgramResult,
 };
-use pinocchio_pubkey::pubkey;
-
-use crate::error::KassandraError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Program IDs
@@ -79,18 +78,22 @@ use crate::error::KassandraError;
 
 /// MetaDAO `futarchy` v0.6.0 governance/proposal program (mainnet-beta). Replaces
 /// the legacy `autocrat`.
-pub const FUTARCHY_ID: Pubkey = pubkey!("FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq");
+pub const FUTARCHY_ID: Pubkey =
+    Pubkey::from_str_const("FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq");
 
 /// MetaDAO `conditional_vault` (v0.6 line). Byte-for-byte the same deployed
 /// program as the v0.4 vault ([`super::metadao::CONDITIONAL_VAULT_ID`]); v0.6
 /// reuses it. Its instruction/account discriminators are unchanged.
-pub const CONDITIONAL_VAULT_V06_ID: Pubkey = pubkey!("VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg");
+pub const CONDITIONAL_VAULT_V06_ID: Pubkey =
+    Pubkey::from_str_const("VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg");
 
 /// Meteora DAMM v2 (cp-amm) program (mainnet-beta).
-pub const METEORA_DAMM_V2_ID: Pubkey = pubkey!("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
+pub const METEORA_DAMM_V2_ID: Pubkey =
+    Pubkey::from_str_const("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
 
 /// Squads v4 multisig program — hosts the DAO execution-authority vault PDA.
-pub const SQUADS_V4_ID: Pubkey = pubkey!("SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf");
+pub const SQUADS_V4_ID: Pubkey =
+    Pubkey::from_str_const("SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Anchor instruction discriminators — sha256("global:<name>")[..8]
@@ -420,25 +423,30 @@ pub fn futarchy_spot_twap(dao_data: &[u8]) -> Result<u128, ProgramError> {
 
 /// futarchy `Dao` PDA seeds: `[b"dao", dao_creator, nonce_le[8]]`.
 pub fn dao_seeds<'a>(dao_creator: &'a Pubkey, nonce_le: &'a [u8; 8]) -> [&'a [u8]; 3] {
-    [SEED_DAO, dao_creator, nonce_le]
+    [SEED_DAO, dao_creator.as_ref(), nonce_le]
 }
 
 /// futarchy `Proposal` PDA seeds: `[b"proposal", squads_proposal]`.
 pub fn proposal_seeds(squads_proposal: &Pubkey) -> [&[u8]; 2] {
-    [SEED_PROPOSAL, squads_proposal]
+    [SEED_PROPOSAL, squads_proposal.as_ref()]
 }
 
 /// Squads multisig PDA seeds: `[b"multisig", b"multisig", create_key]` where
 /// `create_key` == the futarchy `Dao` PDA.
 pub fn squads_multisig_seeds(dao: &Pubkey) -> [&[u8]; 3] {
-    [SQUADS_SEED_PREFIX, SQUADS_SEED_MULTISIG, dao]
+    [SQUADS_SEED_PREFIX, SQUADS_SEED_MULTISIG, dao.as_ref()]
 }
 
 /// Squads vault (DAO execution authority) PDA seeds:
 /// `[b"multisig", multisig, b"vault", vault_index_le[1]]`. The futarchy DAO uses
 /// vault index 0.
 pub fn squads_vault_seeds<'a>(multisig: &'a Pubkey, vault_index: &'a [u8; 1]) -> [&'a [u8]; 4] {
-    [SQUADS_SEED_PREFIX, multisig, SQUADS_SEED_VAULT, vault_index]
+    [
+        SQUADS_SEED_PREFIX,
+        multisig.as_ref(),
+        SQUADS_SEED_VAULT,
+        vault_index,
+    ]
 }
 
 /// futarchy `#[event_cpi]` event-authority PDA seeds: `[b"__event_authority"]`.
@@ -452,29 +460,29 @@ pub fn event_authority_seeds() -> [&'static [u8]; 1] {
 
 /// futarchy `Dao` PDA.
 pub fn dao_pda(dao_creator: &Pubkey, nonce: u64) -> (Pubkey, u8) {
-    find_program_address(&dao_seeds(dao_creator, &nonce.to_le_bytes()), &FUTARCHY_ID)
+    Pubkey::find_program_address(&dao_seeds(dao_creator, &nonce.to_le_bytes()), &FUTARCHY_ID)
 }
 
 /// futarchy `Proposal` PDA.
 pub fn proposal_pda(squads_proposal: &Pubkey) -> (Pubkey, u8) {
-    find_program_address(&proposal_seeds(squads_proposal), &FUTARCHY_ID)
+    Pubkey::find_program_address(&proposal_seeds(squads_proposal), &FUTARCHY_ID)
 }
 
 /// Squads multisig PDA for a DAO (create_key == `dao`).
 pub fn squads_multisig_pda(dao: &Pubkey) -> (Pubkey, u8) {
-    find_program_address(&squads_multisig_seeds(dao), &SQUADS_V4_ID)
+    Pubkey::find_program_address(&squads_multisig_seeds(dao), &SQUADS_V4_ID)
 }
 
 /// Squads **vault** PDA (DAO execution authority) for `multisig` at `vault_index`.
 /// This is the key Kassandra stores as `Protocol.dao_authority` and requires as
 /// signer on `set_config` / `resolve_deadend`.
 pub fn squads_vault_pda(multisig: &Pubkey, vault_index: u8) -> (Pubkey, u8) {
-    find_program_address(&squads_vault_seeds(multisig, &[vault_index]), &SQUADS_V4_ID)
+    Pubkey::find_program_address(&squads_vault_seeds(multisig, &[vault_index]), &SQUADS_V4_ID)
 }
 
 /// futarchy `#[event_cpi]` event-authority PDA.
 pub fn event_authority_pda() -> (Pubkey, u8) {
-    find_program_address(&event_authority_seeds(), &FUTARCHY_ID)
+    Pubkey::find_program_address(&event_authority_seeds(), &FUTARCHY_ID)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -557,31 +565,31 @@ pub fn initialize_dao_data_no_limit(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Invoke an instruction on the `futarchy` v0.6 program with PDA signers.
-pub fn invoke_futarchy_signed(
+pub fn invoke_futarchy_signed<A: AsRef<AccountInfo>>(
     data: &[u8],
-    metas: &[AccountMeta],
-    infos: &[&AccountInfo],
+    metas: &[InstructionAccount],
+    infos: &[A],
     signers: &[Signer],
 ) -> ProgramResult {
-    let ix = Instruction {
+    let ix = InstructionView {
         program_id: &FUTARCHY_ID,
         data,
         accounts: metas,
     };
-    pinocchio::cpi::slice_invoke_signed(&ix, infos, signers)
+    pinocchio::cpi::invoke_signed_with_slice(&ix, infos, signers)
 }
 
 /// Invoke an instruction on the Meteora DAMM v2 (cp-amm) program with PDA signers.
-pub fn invoke_meteora_signed(
+pub fn invoke_meteora_signed<A: AsRef<AccountInfo>>(
     data: &[u8],
-    metas: &[AccountMeta],
-    infos: &[&AccountInfo],
+    metas: &[InstructionAccount],
+    infos: &[A],
     signers: &[Signer],
 ) -> ProgramResult {
-    let ix = Instruction {
+    let ix = InstructionView {
         program_id: &METEORA_DAMM_V2_ID,
         data,
         accounts: metas,
     };
-    pinocchio::cpi::slice_invoke_signed(&ix, infos, signers)
+    pinocchio::cpi::invoke_signed_with_slice(&ix, infos, signers)
 }

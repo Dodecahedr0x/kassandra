@@ -16,7 +16,8 @@
 //! Empty (after the 1-byte discriminant).
 
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, error::ProgramError,
+    ProgramResult,
 };
 
 use crate::{
@@ -24,7 +25,11 @@ use crate::{
     state::{Oracle, Phase},
 };
 
-pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -> ProgramResult {
+pub fn process(
+    program_id: &Pubkey,
+    accounts: &mut [AccountInfo],
+    _payload: &[u8],
+) -> ProgramResult {
     let [oracle_ai, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -46,7 +51,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], _payload: &[u8]) -
         .ok_or(ProgramError::ArithmeticOverflow)?;
 
     {
-        let mut data = oracle_ai.try_borrow_mut_data()?;
+        let mut data = oracle_ai.try_borrow_mut()?;
         data[..Oracle::LEN].copy_from_slice(bytemuck::bytes_of(&oracle));
     }
 

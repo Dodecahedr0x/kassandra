@@ -75,8 +75,8 @@ fn propose_happy_path() {
     assert!(res.is_ok(), "propose should succeed: {res:?}");
 
     let p = ctx.proposer(proposer_pda);
-    assert_eq!(p.oracle, oracle.to_bytes());
-    assert_eq!(p.authority, authority.pubkey().to_bytes());
+    assert_eq!(p.oracle, oracle.to_bytes().into());
+    assert_eq!(p.authority, authority.pubkey().to_bytes().into());
     assert_eq!(p.bond, bond);
     assert_eq!(p.original_option, option);
     assert_eq!(

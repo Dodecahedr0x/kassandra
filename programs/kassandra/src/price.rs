@@ -40,7 +40,7 @@
 //! milestone) is its first consumer; the optional [`crate::instruction::Ix::KassPrice`]
 //! instruction wrapper exposes it for that seam + off-chain queries today.
 
-use pinocchio::{account_info::AccountInfo, program_error::ProgramError};
+use pinocchio::{account::AccountView as AccountInfo, error::ProgramError};
 
 use crate::{
     cpi::metadao_v06,
@@ -63,6 +63,6 @@ pub fn kass_price(protocol: &Protocol, kass_dao_ai: &AccountInfo) -> Result<u128
     // (2) Owner anchor (defense-in-depth): it must be a futarchy `Dao` account.
     assert_owned_by_program(kass_dao_ai, &metadao_v06::FUTARCHY_ID)?;
     // (3) Read the embedded spot oracle at the F0-validated fixed offsets.
-    let data = kass_dao_ai.try_borrow_data()?;
+    let data = kass_dao_ai.try_borrow()?;
     metadao_v06::futarchy_spot_twap(&data)
 }

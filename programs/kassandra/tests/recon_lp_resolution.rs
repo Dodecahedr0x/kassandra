@@ -50,7 +50,7 @@ const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5x
 const MAX_PRICE: u128 = (u64::MAX as u128) * 1_000_000_000_000;
 
 fn amm_id() -> Pubkey {
-    Pubkey::new_from_array(metadao::AMM_ID)
+    Pubkey::new_from_array(metadao::AMM_ID.to_bytes())
 }
 
 fn ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {

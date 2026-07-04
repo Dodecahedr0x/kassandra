@@ -55,16 +55,16 @@ const SQUADS_SO: &[u8] = include_bytes!("fixtures/squads_v4.so");
 const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 fn futarchy_id() -> Pubkey {
-    Pubkey::new_from_array(md6::FUTARCHY_ID)
+    Pubkey::new_from_array(md6::FUTARCHY_ID.to_bytes())
 }
 fn vault_id() -> Pubkey {
-    Pubkey::new_from_array(md6::CONDITIONAL_VAULT_V06_ID)
+    Pubkey::new_from_array(md6::CONDITIONAL_VAULT_V06_ID.to_bytes())
 }
 fn meteora_id() -> Pubkey {
-    Pubkey::new_from_array(md6::METEORA_DAMM_V2_ID)
+    Pubkey::new_from_array(md6::METEORA_DAMM_V2_ID.to_bytes())
 }
 fn squads_id() -> Pubkey {
-    Pubkey::new_from_array(md6::SQUADS_V4_ID)
+    Pubkey::new_from_array(md6::SQUADS_V4_ID.to_bytes())
 }
 
 fn load_all(svm: &mut LiteSVM) {
@@ -233,15 +233,15 @@ fn squads_vault_transaction_execute_discriminator_recognized() {
 fn squads_vault_pda_derivation() {
     let dao = Pubkey::new_unique().to_bytes();
     let (multisig, _) =
-        Pubkey::find_program_address(&md6::squads_multisig_seeds(&dao), &squads_id());
+        Pubkey::find_program_address(&md6::squads_multisig_seeds(&dao.into()), &squads_id());
     let multisig_arr = multisig.to_bytes();
     let (vault, _vbump) = Pubkey::find_program_address(
-        &md6::squads_vault_seeds(&multisig_arr, &[0u8]),
+        &md6::squads_vault_seeds(&multisig_arr.into(), &[0u8]),
         &squads_id(),
     );
     // Re-derivation is stable.
     let (vault2, _) = Pubkey::find_program_address(
-        &md6::squads_vault_seeds(&multisig_arr, &[0u8]),
+        &md6::squads_vault_seeds(&multisig_arr.into(), &[0u8]),
         &squads_id(),
     );
     assert_eq!(vault, vault2);
@@ -257,26 +257,26 @@ fn seed_helpers_match_documented_layout() {
     let creator = [3u8; 32];
     let nonce_le = 7u64.to_le_bytes();
     assert_eq!(
-        md6::dao_seeds(&creator, &nonce_le),
+        md6::dao_seeds(&creator.into(), &nonce_le),
         [b"dao".as_ref(), creator.as_ref(), nonce_le.as_ref()],
     );
 
     let squads_proposal = [9u8; 32];
     assert_eq!(
-        md6::proposal_seeds(&squads_proposal),
+        md6::proposal_seeds(&squads_proposal.into()),
         [b"proposal".as_ref(), squads_proposal.as_ref()],
     );
 
     let dao = [1u8; 32];
     assert_eq!(
-        md6::squads_multisig_seeds(&dao),
+        md6::squads_multisig_seeds(&dao.into()),
         [b"multisig".as_ref(), b"multisig".as_ref(), dao.as_ref()],
     );
 
     let multisig = [2u8; 32];
     let vault_index = [0u8; 1];
     assert_eq!(
-        md6::squads_vault_seeds(&multisig, &vault_index),
+        md6::squads_vault_seeds(&multisig.into(), &vault_index),
         [
             b"multisig".as_ref(),
             multisig.as_ref(),
@@ -326,19 +326,21 @@ fn v06_conditional_vault_split() {
 
     let kass_arr = kass.to_bytes();
     let (question, _) = Pubkey::find_program_address(
-        &md4::question_seeds(&question_id, &resolver_pk, &[num_outcomes]),
+        &md4::question_seeds(&question_id, &resolver_pk.into(), &[num_outcomes]),
         &vault_id(),
     );
     let question_arr = question.to_bytes();
-    let (vault, _) =
-        Pubkey::find_program_address(&md4::vault_seeds(&question_arr, &kass_arr), &vault_id());
+    let (vault, _) = Pubkey::find_program_address(
+        &md4::vault_seeds(&question_arr.into(), &kass_arr.into()),
+        &vault_id(),
+    );
     let vault_arr = vault.to_bytes();
     let (cond0, _) = Pubkey::find_program_address(
-        &md4::conditional_token_mint_seeds(&vault_arr, &[0u8]),
+        &md4::conditional_token_mint_seeds(&vault_arr.into(), &[0u8]),
         &vault_id(),
     );
     let (cond1, _) = Pubkey::find_program_address(
-        &md4::conditional_token_mint_seeds(&vault_arr, &[1u8]),
+        &md4::conditional_token_mint_seeds(&vault_arr.into(), &[1u8]),
         &vault_id(),
     );
     let (event_authority, _) =
@@ -355,7 +357,8 @@ fn v06_conditional_vault_split() {
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
         ],
-        data: md4::initialize_question_data(&question_id, &resolver_pk, num_outcomes).to_vec(),
+        data: md4::initialize_question_data(&question_id, &resolver_pk.into(), num_outcomes)
+            .to_vec(),
     };
     send(&mut svm, &payer, &[ix_q]).expect("initialize_question failed");
 

@@ -78,7 +78,7 @@ fn set_config_gate_accepts_only_recorded_squads_vault_pda() {
     assert!(res.is_ok(), "handoff should succeed: {res:?}");
     assert_eq!(
         ctx.protocol(protocol_pda).dao_authority,
-        vault_pda.to_bytes(),
+        vault_pda.to_bytes().into(),
         "dao_authority must be the derived Squads vault PDA"
     );
 
@@ -104,7 +104,7 @@ fn set_config_gate_accepts_only_recorded_squads_vault_pda() {
 
     // The config is unchanged (no signer could pass the gate).
     let p = ctx.protocol(protocol_pda);
-    assert_eq!(p.dao_authority, vault_pda.to_bytes());
+    assert_eq!(p.dao_authority, vault_pda.to_bytes().into());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

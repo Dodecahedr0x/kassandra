@@ -48,11 +48,11 @@ const SNAPSHOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/compute_units
 /// a `find_program_address`) against program-id drift: re-derive it and compare.
 #[test]
 fn protocol_pda_const_matches_derivation() {
-    let pid = Pubkey::new_from_array(kassandra_program::ID);
+    let pid = Pubkey::new_from_array(kassandra_program::ID.to_bytes());
     let (derived, bump) = Pubkey::find_program_address(&[b"protocol"], &pid);
     assert_eq!(
         derived.to_bytes(),
-        kassandra_program::processor::guards::PROTOCOL_PDA,
+        kassandra_program::processor::guards::PROTOCOL_PDA.to_bytes(),
         "PROTOCOL_PDA const is stale — re-derive it (did the program id change?)",
     );
     assert_eq!(
@@ -135,7 +135,14 @@ fn cu_metering_full_lifecycle_matches_snapshot() {
     for (auth, pda) in authorities.iter().zip(&proposer_pdas) {
         ctx.svm.airdrop(&auth.pubkey(), 1_000_000_000).unwrap();
         let (claim, _) = claim_pda(&ctx.program_id, &oracle, pda);
-        let ix = submit_ai_claim_ix(&ctx, oracle, *pda, claim, auth.pubkey(), submit_ai_payload(0));
+        let ix = submit_ai_claim_ix(
+            &ctx,
+            oracle,
+            *pda,
+            claim,
+            auth.pubkey(),
+            submit_ai_payload(0),
+        );
         ctx.send(ix, &[auth]).expect("submit_ai_claim");
     }
 

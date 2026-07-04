@@ -84,18 +84,16 @@
 //! PDA signer seeds, identical to `settle_challenge`.
 
 use pinocchio::{
-    account_info::AccountInfo,
-    instruction::Signer,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    ProgramResult,
+    account::AccountView as AccountInfo, address::Address as Pubkey, cpi::Signer,
+    error::ProgramError, ProgramResult,
 };
 use pinocchio_token::instructions::Transfer;
 
 use crate::{
     error::KassandraError,
     processor::guards::{
-        assert_key, assert_token_account, load_fact, load_oracle, require_terminal, verify_oracle_pda,
+        assert_key, assert_token_account, drain_lamports, load_fact, load_oracle, require_terminal,
+        verify_oracle_pda,
     },
     reward,
     state::{AccountType, Fact, FactVote, Oracle, Phase, Proposer, VOTE_DUPLICATE},
@@ -136,8 +134,8 @@ fn payout_and_close(
     oracle_ai: &AccountInfo,
     stake_vault: &AccountInfo,
     dest: &AccountInfo,
-    claimant: &AccountInfo,
-    rent_recipient: &AccountInfo,
+    claimant: &mut AccountInfo,
+    rent_recipient: &mut AccountInfo,
     nonce: u64,
     bump: u8,
     amount: u64,
@@ -146,25 +144,13 @@ fn payout_and_close(
         let nonce_le = nonce.to_le_bytes();
         let bump_seed = [bump];
         let seeds = Oracle::signer_seeds(&nonce_le, &bump_seed);
-        Transfer {
-            from: stake_vault,
-            to: dest,
-            authority: oracle_ai,
-            amount,
-        }
-        .invoke_signed(&[Signer::from(&seeds)])?;
+        Transfer::new(stake_vault, dest, oracle_ai, amount)
+            .invoke_signed(&[Signer::from(&seeds)])?;
     }
 
     // Drain rent lamports to the recipient, then zero the account (data len /
     // lamports / owner). Done in this order so the instruction stays balanced.
-    {
-        let mut from = claimant.try_borrow_mut_lamports()?;
-        let mut to = rent_recipient.try_borrow_mut_lamports()?;
-        *to = to
-            .checked_add(*from)
-            .ok_or(ProgramError::ArithmeticOverflow)?;
-        *from = 0;
-    }
+    drain_lamports(claimant, rent_recipient)?;
     claimant.close()
 }
 
@@ -195,7 +181,7 @@ fn slash_amount(value: u64, num: u64, den: u64) -> u64 {
 
 pub fn claim_proposer(
     program_id: &Pubkey,
-    accounts: &[AccountInfo],
+    accounts: &mut [AccountInfo],
     payload: &[u8],
 ) -> ProgramResult {
     if payload.len() != PAYLOAD_LEN {
@@ -216,7 +202,7 @@ pub fn claim_proposer(
     assert_key(stake_vault_ai, &oracle.stake_vault)?;
 
     // Load + bind the proposer (type guard + this-oracle membership).
-    let proposer = load_proposer_checked(proposer_ai, program_id, oracle_ai.key())?;
+    let proposer = load_proposer_checked(proposer_ai, program_id, oracle_ai.address())?;
     assert_token_account(dest_kass_ai, &oracle.kass_mint, &proposer.authority)?;
     assert_key(rent_recipient_ai, &proposer.authority)?;
 
@@ -295,7 +281,11 @@ fn load_proposer_checked(
 // claim_fact
 // ---------------------------------------------------------------------------
 
-pub fn claim_fact(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8]) -> ProgramResult {
+pub fn claim_fact(
+    program_id: &Pubkey,
+    accounts: &mut [AccountInfo],
+    payload: &[u8],
+) -> ProgramResult {
     if payload.len() != PAYLOAD_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -314,7 +304,7 @@ pub fn claim_fact(program_id: &Pubkey, accounts: &[AccountInfo], payload: &[u8])
     assert_key(stake_vault_ai, &oracle.stake_vault)?;
 
     let fact = load_fact(fact_ai, program_id)?;
-    if &fact.oracle != oracle_ai.key() {
+    if &fact.oracle != oracle_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
     // The fact's submitter authority is `fact.proposer`.
@@ -384,7 +374,7 @@ fn fact_submitter_entitlement(
 
 pub fn claim_fact_vote(
     program_id: &Pubkey,
-    accounts: &[AccountInfo],
+    accounts: &mut [AccountInfo],
     payload: &[u8],
 ) -> ProgramResult {
     if payload.len() != PAYLOAD_LEN {
@@ -408,7 +398,7 @@ pub fn claim_fact_vote(
     // vote.fact == fact_ai and fact.oracle == oracle.
     let vote = load_fact_vote(vote_ai, program_id)?;
     let mut fact = load_fact(fact_ai, program_id)?;
-    if &vote.fact != fact_ai.key() || &fact.oracle != oracle_ai.key() {
+    if &vote.fact != fact_ai.address() || &fact.oracle != oracle_ai.address() {
         return Err(KassandraError::InvalidAccount.into());
     }
     assert_token_account(dest_kass_ai, &oracle.kass_mint, &vote.voter)?;
@@ -465,7 +455,7 @@ pub fn claim_fact_vote(
         fact.approve_stake = fact.approve_stake.saturating_sub(vote.stake);
     }
     {
-        let mut data = fact_ai.try_borrow_mut_data()?;
+        let mut data = fact_ai.try_borrow_mut()?;
         data[..Fact::LEN].copy_from_slice(bytemuck::bytes_of(&fact));
     }
 
@@ -488,7 +478,7 @@ fn load_fact_vote(account: &AccountInfo, program_id: &Pubkey) -> Result<FactVote
         return Err(KassandraError::InvalidAccount.into());
     }
     let vote: FactVote = {
-        let data = account.try_borrow_data()?;
+        let data = account.try_borrow()?;
         bytemuck::pod_read_unaligned::<FactVote>(&data[..FactVote::LEN])
     };
     if vote.account_type != AccountType::FactVote.as_u8() {
