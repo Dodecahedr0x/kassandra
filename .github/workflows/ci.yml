@@ -213,13 +213,18 @@ jobs:
           node-version: 20
           cache: pnpm
 
-      # surfpool (the local Solana simnet the e2e harness boots) — published to the
-      # snap store by txtx. If the channel changes, swap this for the installer at
-      # https://surfpool.run or a github.com/txtx/surfpool release download.
+      # surfpool (the local Solana simnet the e2e harness boots). Pinned to the
+      # GitHub release the harness was validated against (see NOTES-surfpool.md).
+      # The snap `latest` channel is stale — it serves 0.9.5, whose `--version`
+      # even exits non-zero, and it predates the 1.0.0 boot behavior the harness
+      # relies on. Bump SURFPOOL_VERSION deliberately, re-checking the harness.
       - name: Install surfpool
+        env:
+          SURFPOOL_VERSION: v1.0.0
         run: |
-          # Cover both snap confinement modes (strict / classic).
-          sudo snap install surfpool || sudo snap install surfpool --classic
+          curl -fsSL "https://github.com/txtx/surfpool/releases/download/${SURFPOOL_VERSION}/surfpool-linux-x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin surfpool
+          sudo chmod +x /usr/local/bin/surfpool
           surfpool --version
 
       - name: Download program artifact
@@ -245,4 +250,4 @@ jobs:
       - name: Run browser E2E (local simnet)
         run: pnpm --filter app exec playwright test
         env:
-          SURFPOOL_BIN: /snap/bin/surfpool
+          SURFPOOL_BIN: /usr/local/bin/surfpool
