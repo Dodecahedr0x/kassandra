@@ -1,8 +1,22 @@
 # `scripts/`
 
-Helper scripts for the [Kassandra](../README.md) monorepo. These dump MetaDAO's on-chain
-program binaries into the test fixtures directory so the program's **LiteSVM CPI tests are
-fully hermetic** — no network access at test time.
+Helper scripts for the [Kassandra](../README.md) monorepo. Most are invoked via the
+top-level [`Makefile`](../Makefile) (`make help`) rather than directly.
+
+## Dev stack + E2E
+
+| Script | Make target | What it does |
+| --- | --- | --- |
+| `dev-up.sh` | `make chain` / `make app-local` / `make dev` | Boot a **seeded** local surfpool chain (via `app/e2e/dev-seed.ts`) and/or the app dev server against it. |
+| `e2e-playwright.sh` | `make test-e2e` | Browser E2E: surfpool + a script-funded wallet + the app. |
+| `e2e-playwright-fork.sh` | `make test-e2e-fork` | Browser E2E over a **mainnet-forked** challenge-market cluster. |
+| `e2e-playwright-indexer.sh` | `make test-e2e-indexer` | Browser E2E: surfpool + Postgres + the real indexer + the app ActivityFeed. |
+
+## MetaDAO fixtures
+
+The `fetch-*` scripts dump MetaDAO's on-chain program binaries into the test fixtures
+directory so the program's **LiteSVM CPI tests are fully hermetic** — no network access at
+test time.
 
 Kassandra reuses MetaDAO's deployed programs (conditional vault + AMM for the v0.4 dispute
 core, and the futarchy/Meteora stack for v0.6) via CPI. To exercise those CPI paths in

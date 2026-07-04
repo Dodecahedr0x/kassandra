@@ -59,6 +59,31 @@ decision markets via CPI; Kassandra does not reimplement the vault or AMM.
   Solana toolchain (`cargo build-sbf`, from the Solana CLI / Agave).
 - **Node.js** and **pnpm** (the `sdk` and `app` form a pnpm workspace).
 - [`just`](https://github.com/casey/just) for the program build/test recipes.
+- For the e2e / dev-stack targets: [`surfpool`](https://surfpool.run) and Postgres
+  (`initdb`/`pg_ctl`).
+
+### One entrypoint: `make`
+
+Every useful task is a `make` target — `make help` lists them all. It delegates to
+`cargo`, `just`, `pnpm`, and the `scripts/*.sh`, so there's a single surface:
+
+```bash
+make setup       # install JS deps + build the program (.so) and SDK (first run)
+make build       # build everything (program, sdk, app, runner, indexer)
+make test        # all unit tests (rust workspace + sdk + app + indexer)
+make lint        # oxlint (app) + clippy (rust)
+make typecheck   # sdk + app tsc
+make dev         # boot a seeded local surfpool chain AND the app dev server
+
+make test-e2e            # browser E2E (surfpool + funded wallet + app)
+make test-e2e-fork       # mainnet-forked challenge-market E2E
+make test-e2e-indexer    # surfpool + Postgres + indexer + ActivityFeed E2E
+make ci                  # exactly what CI runs
+```
+
+`make dev` (or `make chain` alone) boots surfpool, deploys the program, and seeds a
+spread of oracles across phases — then holds the chain alive so you can browse it in
+the app. Ctrl-C tears it down.
 
 ### Build & test the program
 
