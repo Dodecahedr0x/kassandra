@@ -5,12 +5,11 @@ mod common;
 use common::*;
 
 use kassandra_program::{error::KassandraError, instruction::Ix};
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction, InstructionError},
-    pubkey::Pubkey,
-    signature::Signer,
-    transaction::TransactionError,
-};
+use solana_instruction::{AccountMeta, Instruction};
+use solana_instruction_error::InstructionError;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 /// Build a single instruction to the program with the given data and a single
 /// (signer, writable) payer account so the transaction is well-formed.

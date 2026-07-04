@@ -39,7 +39,10 @@ pub struct EventsQuery {
 pub fn router(state: ApiState) -> Router {
     // The read API is public + cross-origin (the dApp on another origin reads it),
     // so allow any origin for GETs. No credentials/cookies are involved.
-    let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/status", get(status))
@@ -64,9 +67,12 @@ async fn rpc_gateway(State(s): State<ApiState>, body: Bytes) -> impl IntoRespons
         .await
     {
         Ok(resp) => {
-            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             match resp.bytes().await {
-                Ok(bytes) => (status, [(header::CONTENT_TYPE, "application/json")], bytes).into_response(),
+                Ok(bytes) => {
+                    (status, [(header::CONTENT_TYPE, "application/json")], bytes).into_response()
+                }
                 Err(e) => err(e).into_response(),
             }
         }
@@ -107,7 +113,9 @@ async fn events(State(s): State<ApiState>, Query(q): Query<EventsQuery>) -> impl
     )
     .await
     {
-        Ok(rows) => Json(serde_json::json!({ "count": rows.len(), "events": rows })).into_response(),
+        Ok(rows) => {
+            Json(serde_json::json!({ "count": rows.len(), "events": rows })).into_response()
+        }
         Err(e) => err(e).into_response(),
     }
 }
@@ -117,7 +125,14 @@ async fn account_events(
     Path(pubkey): Path<String>,
     Query(q): Query<EventsQuery>,
 ) -> impl IntoResponse {
-    match db::query_events(&s.client, None, Some(&pubkey), q.before_slot, q.limit.unwrap_or(100)).await
+    match db::query_events(
+        &s.client,
+        None,
+        Some(&pubkey),
+        q.before_slot,
+        q.limit.unwrap_or(100),
+    )
+    .await
     {
         Ok(rows) => {
             Json(serde_json::json!({ "account": pubkey, "count": rows.len(), "events": rows }))

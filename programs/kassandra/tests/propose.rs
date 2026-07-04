@@ -13,7 +13,8 @@ use kassandra_program::{
     error::KassandraError,
     state::CLAIM_OPTION_NONE,
 };
-use solana_sdk::signature::{Keypair, Signer};
+use solana_keypair::Keypair;
+use solana_signer::Signer;
 
 /// Seconds between an oracle's creation `now` and its `deadline`; tests warp
 /// past it to open the proposal window.
@@ -21,8 +22,8 @@ const DEADLINE_DELTA: i64 = 1_000;
 
 /// Decode a LiteSVM transaction error into its `Custom(u32)` code, if any.
 fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
-    use solana_sdk::instruction::InstructionError;
-    use solana_sdk::transaction::TransactionError;
+    use solana_instruction_error::InstructionError;
+    use solana_transaction_error::TransactionError;
     match res {
         Err(meta) => match &meta.err {
             TransactionError::InstructionError(_, InstructionError::Custom(code)) => Some(*code),
@@ -35,7 +36,7 @@ fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
 /// Init the protocol and create an oracle in `Phase::Proposal` with the given
 /// `options_count` and a `deadline = now + DEADLINE_DELTA`. Returns the Oracle
 /// PDA. Does NOT warp past the deadline (the caller decides).
-fn setup(ctx: &mut TestCtx, nonce: u64, options_count: u8) -> solana_sdk::pubkey::Pubkey {
+fn setup(ctx: &mut TestCtx, nonce: u64, options_count: u8) -> solana_pubkey::Pubkey {
     let (_p, res) = ctx.init_protocol();
     assert!(res.is_ok(), "init_protocol should succeed: {res:?}");
     let deadline = ctx.now() + DEADLINE_DELTA;

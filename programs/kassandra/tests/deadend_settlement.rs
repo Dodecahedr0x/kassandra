@@ -17,10 +17,9 @@ mod common;
 use common::*;
 
 use kassandra_program::state::{Phase, CLAIM_OPTION_NONE};
-use solana_sdk::{
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 // ---------------------------------------------------------------------------
 // Arm 1 — no-facts dead-end: bonds + emission BURNED, every proposer claims 0.

@@ -13,16 +13,16 @@ use kassandra_program::{
     error::KassandraError,
     state::Phase,
 };
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Keypair;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
 
 /// Seconds between an oracle's creation `now` and its `deadline`.
 const DEADLINE_DELTA: i64 = 1_000;
 
 /// Decode a LiteSVM transaction error into its `Custom(u32)` code, if any.
 fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
-    use solana_sdk::instruction::InstructionError;
-    use solana_sdk::transaction::TransactionError;
+    use solana_instruction_error::InstructionError;
+    use solana_transaction_error::TransactionError;
     match res {
         Err(meta) => match &meta.err {
             TransactionError::InstructionError(_, InstructionError::Custom(code)) => Some(*code),

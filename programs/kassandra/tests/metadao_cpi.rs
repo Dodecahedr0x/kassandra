@@ -10,14 +10,13 @@
 
 use kassandra_program::cpi::metadao;
 use litesvm::LiteSVM;
-use solana_sdk::{
-    account::Account,
-    compute_budget::ComputeBudgetInstruction,
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::Transaction,
-};
+use solana_account::Account;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 use spl_token::{
     solana_program::{program_option::COption, program_pack::Pack},
     state::{Account as TokenAccount, AccountState, Mint},
@@ -28,7 +27,8 @@ const VAULT_SO: &[u8] = include_bytes!("fixtures/metadao_conditional_vault.so");
 const AMM_SO: &[u8] = include_bytes!("fixtures/metadao_amm.so");
 
 /// SPL associated-token-account program id (loaded by `LiteSVM::new()`).
-const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const ATA_PROGRAM_ID: Pubkey =
+    solana_pubkey::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 fn vault_id() -> Pubkey {
     Pubkey::new_from_array(metadao::CONDITIONAL_VAULT_ID.to_bytes())
@@ -114,8 +114,8 @@ fn token_balance(svm: &LiteSVM, addr: Pubkey) -> u64 {
 }
 
 fn load_metadao(svm: &mut LiteSVM) {
-    svm.add_program(vault_id(), VAULT_SO);
-    svm.add_program(amm_id(), AMM_SO);
+    svm.add_program(vault_id(), VAULT_SO).unwrap();
+    svm.add_program(amm_id(), AMM_SO).unwrap();
 }
 
 /// Drift guard: the host-runnable seed-assembly helpers must produce exactly
@@ -251,7 +251,7 @@ fn split_tokens_mints_conditional_tokens() {
         accounts: vec![
             AccountMeta::new(question, false),
             AccountMeta::new(payer.pubkey(), true),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
         ],
@@ -271,7 +271,7 @@ fn split_tokens_mints_conditional_tokens() {
             AccountMeta::new(payer.pubkey(), true),
             AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
             // remaining: conditional-token mints (created here)

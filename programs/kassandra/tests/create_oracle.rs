@@ -6,8 +6,8 @@ use common::*;
 
 use kassandra_program::error::KassandraError;
 use kassandra_program::state::{AccountType, Phase};
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signer;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 /// Proposal window added to `deadline` to compute `phase_ends_at` (mirrors
 /// `config::PROPOSAL_WINDOW`).
@@ -15,8 +15,8 @@ const PROPOSAL_WINDOW: i64 = 3600;
 
 /// Decode a LiteSVM transaction error into its `Custom(u32)` code, if any.
 fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
-    use solana_sdk::instruction::InstructionError;
-    use solana_sdk::transaction::TransactionError;
+    use solana_instruction_error::InstructionError;
+    use solana_transaction_error::TransactionError;
     match res {
         Err(meta) => match &meta.err {
             TransactionError::InstructionError(_, InstructionError::Custom(code)) => Some(*code),
@@ -101,8 +101,8 @@ fn nonpositive_twap_window_fails() {
     let deadline = ctx.now() + 1_000;
     let (_o, res) = ctx.create_oracle(1, 2, deadline, 0, [0; 32]);
     // twap_window <= 0 is a payload sanity failure → InvalidInstructionData.
-    use solana_sdk::instruction::InstructionError;
-    use solana_sdk::transaction::TransactionError;
+    use solana_instruction_error::InstructionError;
+    use solana_transaction_error::TransactionError;
     assert!(
         matches!(
             &res,

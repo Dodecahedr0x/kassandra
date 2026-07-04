@@ -6,13 +6,14 @@ use common::*;
 
 use kassandra_program::error::KassandraError;
 use kassandra_program::state::Phase;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::{Keypair, Signer};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 /// Decode a LiteSVM transaction error into its `Custom(u32)` code, if any.
 fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
-    use solana_sdk::instruction::InstructionError;
-    use solana_sdk::transaction::TransactionError;
+    use solana_instruction_error::InstructionError;
+    use solana_transaction_error::TransactionError;
     match res {
         Err(meta) => match &meta.err {
             TransactionError::InstructionError(_, InstructionError::Custom(code)) => Some(*code),
@@ -25,7 +26,7 @@ fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
 /// Init the protocol, hand governance off to a fresh funded `dao` keypair (so it
 /// can sign `resolve_deadend`), then seed a 2-option oracle and force it into
 /// [`Phase::InvalidDeadend`]. Returns `(ctx, dao, oracle)`.
-fn deadended_ctx() -> (TestCtx, Keypair, solana_sdk::pubkey::Pubkey) {
+fn deadended_ctx() -> (TestCtx, Keypair, solana_pubkey::Pubkey) {
     let mut ctx = TestCtx::new();
     ctx.ensure_protocol();
 

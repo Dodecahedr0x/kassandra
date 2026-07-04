@@ -12,10 +12,10 @@ mod common;
 use common::*;
 
 use kassandra_program::{error::KassandraError, state::Phase};
-use solana_sdk::{
-    instruction::InstructionError, signature::Keypair, signature::Signer,
-    transaction::TransactionError,
-};
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 /// The custom-error expectation for a failed instruction at index 0.
 fn custom(e: KassandraError) -> TransactionError {
@@ -144,7 +144,7 @@ fn close_ai_claim_other_oracle_fails() {
     let p = &seed.proposers[0];
     let recip = p.authority.pubkey();
     // AiClaim bound to a DIFFERENT oracle than the one passed in.
-    let other_oracle = solana_sdk::pubkey::Pubkey::new_unique();
+    let other_oracle = solana_pubkey::Pubkey::new_unique();
     let ai_claim = ctx.seed_ai_claim(other_oracle, p.account, recip);
 
     let ix = ctx.close_ai_claim_ix(seed.oracle, ai_claim, recip);
@@ -167,8 +167,8 @@ fn market_fixture(
 ) -> (
     TerminalSeed,
     Keypair,
-    solana_sdk::pubkey::Pubkey,
-    solana_sdk::pubkey::Pubkey,
+    solana_pubkey::Pubkey,
+    solana_pubkey::Pubkey,
 ) {
     let seed = ctx.seed_terminal_oracle(Phase::Resolved, 1, &[], &[], 1, 2);
     let challenger = Keypair::new();

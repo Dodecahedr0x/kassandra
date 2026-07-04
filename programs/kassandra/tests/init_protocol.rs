@@ -5,13 +5,13 @@ use common::*;
 
 use kassandra_program::error::KassandraError;
 use kassandra_program::state::AccountType;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signer;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 /// Decode a LiteSVM transaction error into its `Custom(u32)` code, if any.
 fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
-    use solana_sdk::instruction::InstructionError;
-    use solana_sdk::transaction::TransactionError;
+    use solana_instruction_error::InstructionError;
+    use solana_transaction_error::TransactionError;
     match res {
         Err(meta) => match &meta.err {
             TransactionError::InstructionError(_, InstructionError::Custom(code)) => Some(*code),
@@ -55,9 +55,12 @@ fn prefunded_pda_is_adopted() {
     let mut ctx = TestCtx::new();
     let (protocol_pda, _) = TestCtx::protocol_pda(&ctx.program_id);
 
-    // Attacker grief: drop 1 lamport on the deterministic singleton PDA before
-    // anyone bootstraps. A plain CreateAccount would now fail forever.
-    ctx.svm.airdrop(&protocol_pda, 1).unwrap();
+    // Attacker grief: pre-fund the deterministic singleton PDA before anyone
+    // bootstraps. A plain CreateAccount would now fail forever. (The runtime
+    // won't fund a fresh account below rent-exemption, so use that minimum —
+    // the smallest an attacker could actually drop.)
+    let grief_lamports = ctx.svm.minimum_balance_for_rent_exemption(0);
+    ctx.svm.airdrop(&protocol_pda, grief_lamports).unwrap();
 
     let (pda, res) = ctx.init_protocol();
     assert_eq!(pda, protocol_pda);

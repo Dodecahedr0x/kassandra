@@ -180,7 +180,7 @@ pub fn load_keypair(path: &Path) -> Result<Keypair, SubmitError> {
             message: format!("expected 64 bytes, got {}", bytes.len()),
         });
     }
-    Keypair::from_bytes(&bytes).map_err(|e| SubmitError::KeypairMalformed {
+    Keypair::try_from(&bytes[..]).map_err(|e| SubmitError::KeypairMalformed {
         path: display,
         message: format!("not a valid ed25519 keypair: {e}"),
     })

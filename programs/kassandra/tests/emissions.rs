@@ -17,9 +17,10 @@ use kassandra_program::{
     reward,
     state::{Phase, CLAIM_OPTION_NONE},
 };
-use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signature::Signer, transaction::TransactionError,
-};
+use solana_instruction_error::InstructionError;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 /// Recommended-curve test values: cap 2e15 (the harness funds the payer 1e15, so
 /// the reservoir is ~1e15) at rate 1/1_000_000 → a clean 1e9-scale emission.

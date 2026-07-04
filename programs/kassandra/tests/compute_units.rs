@@ -21,11 +21,10 @@ use kassandra_program::{
     config::{PHASE_WINDOW, PROPOSAL_WINDOW},
     state::{Phase, VOTE_APPROVE},
 };
-use solana_sdk::{
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    signer::keypair::keypair_from_seed,
-};
+use solana_keypair::keypair_from_seed;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 /// A DETERMINISTIC keypair from a fixed 32-byte seed. Using fixed keys makes the
 /// derived PDAs (proposer / fact-vote / ai-claim) — and therefore the
@@ -83,8 +82,8 @@ fn cu_metering_full_lifecycle_matches_snapshot() {
     let fin = ctx.finalize_proposals_ix(oracle, &[p0, p1]);
     ctx.send(fin, &[]).expect("finalize_proposals");
     assert_eq!(ctx.oracle(oracle).phase, Phase::FactProposal.as_u8());
-    let proposer_pdas = vec![p0, p1];
-    let authorities = vec![auth0, auth1];
+    let proposer_pdas = [p0, p1];
+    let authorities = [auth0, auth1];
 
     // 1) submit_fact.
     let submitter = kp(10);

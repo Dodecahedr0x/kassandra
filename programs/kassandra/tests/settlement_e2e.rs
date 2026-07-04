@@ -33,11 +33,10 @@ use kassandra_program::{
     reward,
     state::{Phase, CLAIM_OPTION_NONE, VOTE_APPROVE},
 };
-use solana_sdk::{
-    instruction::Instruction,
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-};
+use solana_instruction::Instruction;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 // ---------------------------------------------------------------------------
 // Dispute-core instruction builders (mirror lifecycle_e2e.rs / challenge_e2e.rs)

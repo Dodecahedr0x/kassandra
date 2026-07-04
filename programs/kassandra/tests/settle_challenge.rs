@@ -20,15 +20,14 @@ use kassandra_program::{
     instruction::Ix,
     state::{AccountType, AiClaim, Market, Phase},
 };
-use solana_sdk::instruction::InstructionError;
-use solana_sdk::{
-    account::Account,
-    compute_budget::ComputeBudgetInstruction,
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::TransactionError,
-};
+use solana_account::Account;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 use spl_token::{
     solana_program::{program_option::COption, program_pack::Pack},
     state::{Account as TokenAccount, AccountState},
@@ -38,7 +37,8 @@ use spl_token::{
 const VAULT_SO: &[u8] = include_bytes!("fixtures/metadao_conditional_vault.so");
 const AMM_SO: &[u8] = include_bytes!("fixtures/metadao_amm.so");
 
-const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const ATA_PROGRAM_ID: Pubkey =
+    solana_pubkey::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 /// Largest observation change per update — lets the recorded observation jump
 /// straight to the pool's current price in a single crank, so a one-crank TWAP
@@ -195,7 +195,7 @@ fn setup_market(ctx: &mut TestCtx, resolver: Pubkey) -> (MarketAccounts, Pubkey,
         accounts: vec![
             AccountMeta::new(question, false),
             AccountMeta::new(payer, true),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
         ],
@@ -215,7 +215,7 @@ fn setup_market(ctx: &mut TestCtx, resolver: Pubkey) -> (MarketAccounts, Pubkey,
             AccountMeta::new(payer, true),
             AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
             AccountMeta::new(pass_mint, false),
@@ -236,7 +236,7 @@ fn setup_market(ctx: &mut TestCtx, resolver: Pubkey) -> (MarketAccounts, Pubkey,
             AccountMeta::new(payer, true),
             AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
             AccountMeta::new(pass_usdc, false),
@@ -332,7 +332,7 @@ fn build_amm(
             AccountMeta::new(vault_ata_quote, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
             AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(amm_event_auth, false),
             AccountMeta::new_readonly(amm_id(), false),
         ],
@@ -454,7 +454,7 @@ fn open_challenge_ix(
             AccountMeta::new(oracle_fail_kass, false),
             AccountMeta::new_readonly(vault_id(), false),
             AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(cv_event_auth, false),
             AccountMeta::new_readonly(protocol, false),
             AccountMeta::new_readonly(kass_dao, false),
@@ -631,8 +631,8 @@ fn fixture(pass_quote: u64, fail_quote: u64) -> (TestCtx, Fixture) {
 
 fn fixture_with_attack(pass_quote: u64, fail_quote: u64, attack: AmmAttack) -> (TestCtx, Fixture) {
     let mut ctx = TestCtx::new();
-    ctx.svm.add_program(vault_id(), VAULT_SO);
-    ctx.svm.add_program(amm_id(), AMM_SO);
+    ctx.svm.add_program(vault_id(), VAULT_SO).unwrap();
+    ctx.svm.add_program(amm_id(), AMM_SO).unwrap();
 
     // Protocol + governance with a deterministic kass_price so open_challenge
     // can size + escrow the challenger USDC.

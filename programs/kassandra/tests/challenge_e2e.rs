@@ -51,14 +51,13 @@ use kassandra_program::{
     state::{AccountType, AiClaim, Market, Phase, VOTE_APPROVE},
 };
 use proptest::prelude::*;
-use solana_sdk::{
-    account::Account,
-    compute_budget::ComputeBudgetInstruction,
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    system_program,
-};
+use solana_account::Account;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
+use solana_signer::Signer;
 use spl_token::{
     solana_program::{program_option::COption, program_pack::Pack},
     state::{Account as TokenAccount, AccountState},
@@ -67,7 +66,8 @@ use spl_token::{
 
 const VAULT_SO: &[u8] = include_bytes!("fixtures/metadao_conditional_vault.so");
 const AMM_SO: &[u8] = include_bytes!("fixtures/metadao_amm.so");
-const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const ATA_PROGRAM_ID: Pubkey =
+    solana_pubkey::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 /// Largest observation change per crank — lets a single crank fold the pool's
 /// current price straight into the TWAP (no per-update clamp), so test TWAPs are
@@ -825,8 +825,8 @@ fn fabricate_payouts(
 #[test]
 fn e2e_honest_full_lifecycle_survives() {
     let mut ctx = TestCtx::new();
-    ctx.svm.add_program(vault_id(), VAULT_SO);
-    ctx.svm.add_program(amm_id(), AMM_SO);
+    ctx.svm.add_program(vault_id(), VAULT_SO).unwrap();
+    ctx.svm.add_program(amm_id(), AMM_SO).unwrap();
     let kass_dao = ctx.bless_kass_price();
 
     // REAL front door → Challenge with an un-slashed proposer + real AiClaim.
@@ -947,8 +947,8 @@ fn e2e_honest_full_lifecycle_survives() {
 #[test]
 fn e2e_fraud_full_lifecycle_swap_driven_disqualifies() {
     let mut ctx = TestCtx::new();
-    ctx.svm.add_program(vault_id(), VAULT_SO);
-    ctx.svm.add_program(amm_id(), AMM_SO);
+    ctx.svm.add_program(vault_id(), VAULT_SO).unwrap();
+    ctx.svm.add_program(amm_id(), AMM_SO).unwrap();
     let kass_dao = ctx.bless_kass_price();
 
     let c = front_door_to_challenge(&mut ctx);
@@ -1149,8 +1149,8 @@ fn assert_resolution_and_conservation(
 #[test]
 fn donation_into_holder_inflates_stake_vault_not_theft() {
     let mut ctx = TestCtx::new();
-    ctx.svm.add_program(vault_id(), VAULT_SO);
-    ctx.svm.add_program(amm_id(), AMM_SO);
+    ctx.svm.add_program(vault_id(), VAULT_SO).unwrap();
+    ctx.svm.add_program(amm_id(), AMM_SO).unwrap();
     let kass_dao = ctx.bless_kass_price();
 
     // Lighter seeded-Challenge setup (the donation mechanic is orthogonal to how
@@ -1426,8 +1426,8 @@ fn fuzz_case_strategy() -> impl Strategy<Value = FuzzCase> {
 
 fn run_fuzz_case(fc: &FuzzCase) -> Result<(), TestCaseError> {
     let mut ctx = TestCtx::new();
-    ctx.svm.add_program(vault_id(), VAULT_SO);
-    ctx.svm.add_program(amm_id(), AMM_SO);
+    ctx.svm.add_program(vault_id(), VAULT_SO).unwrap();
+    ctx.svm.add_program(amm_id(), AMM_SO).unwrap();
     let kass_dao = ctx.bless_kass_price();
 
     let oracle = ctx.seed_disputed_oracle(&[

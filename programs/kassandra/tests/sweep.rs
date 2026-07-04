@@ -14,10 +14,11 @@ mod common;
 use common::*;
 
 use kassandra_program::{config::SWEEP_GRACE, error::KassandraError, state::Phase};
-use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signature::Keypair, signature::Signer,
-    transaction::TransactionError,
-};
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 /// The custom-error expectation for a failed instruction at index 0.
 fn custom(e: KassandraError) -> TransactionError {
@@ -83,7 +84,7 @@ impl Sweepable {
         }
     }
 
-    fn sweep_ix(&self, ctx: &TestCtx) -> solana_sdk::instruction::Instruction {
+    fn sweep_ix(&self, ctx: &TestCtx) -> solana_instruction::Instruction {
         ctx.sweep_oracle_ix(
             self.seed.oracle,
             self.seed.nonce,

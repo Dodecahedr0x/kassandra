@@ -1,12 +1,74 @@
 [workspace]
 resolver = "2"
-members = ["programs/kassandra", "runner", "sdk-rs"]
+members = ["programs/kassandra", "runner", "sdk-rs", "indexer"]
 
+# Every dependency version lives here; member crates reference them with
+# `{ workspace = true }` (adding only crate-specific features).
 [workspace.dependencies]
+# ---- internal crates (path deps) ----
+kassandra-program = { path = "programs/kassandra" }
+kassandra-sdk = { path = "sdk-rs" }
+
+# ---- on-chain (pinocchio) stack ----
+# pinocchio rides the solana-address v2 granular crate; that is the CURRENT
+# (Agave/"v4"-era) release of that crate — the granular solana crates version
+# independently, so 2.x here is not "legacy". It coexists cleanly with the v3
+# client crates below.
 pinocchio = "0.11.2"
 pinocchio-system = "0.6"
 pinocchio-token = "0.6"
+solana-address = "2"
+
+# ---- client-side solana crates (v3 — one major everywhere: sdk-rs, runner,
+#      indexer, and the test harness, so there are no cross-crate type splits) ----
+solana-pubkey = { version = "3", features = ["curve25519"] }
+solana-instruction = "3"
+solana-hash = "3"
+solana-message = "3"
+solana-keypair = "3"
+solana-signer = "3"
+solana-signature = "3"
+solana-transaction = { version = "3", features = ["bincode"] }
+solana-commitment-config = "3"
+
+# ---- shared utilities ----
 bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+bs58 = "0.5"
+base64 = "0.22"
+anyhow = "1"
+thiserror = "2"
+async-trait = "0.1"
+bincode = "1"
+log = "0.4"
+env_logger = "0.11"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "full"] }
+# `http2` for the indexer's outbound RPC; harmless for the runner.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "http2"] }
+
+# ---- indexer (Carbon RPC crawler → Postgres, read API) ----
+carbon-core = "1.0.0"
+carbon-rpc-transaction-crawler-datasource = "1.0.0"
+axum = "0.8"
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+tower-http = { version = "0.7", features = ["cors"] }
+
+# ---- dev/test-only ----
+litesvm = "0.13"
+spl-token = { version = "9", features = ["no-entrypoint"] }
+proptest = "1"
+# Granular crates the test harness needs beyond the client set above. Versions
+# track litesvm 0.13's pins so the error/result types match exactly (note
+# solana-instruction-error is independently at v2).
+solana-account = "3"
+solana-clock = "3"
+solana-instruction-error = "=2.2.0"
+solana-transaction-error = "3"
+solana-sdk-ids = "3"
+solana-compute-budget-interface = "3"
 
 [profile.release]
 overflow-checks = true

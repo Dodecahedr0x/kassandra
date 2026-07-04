@@ -20,12 +20,11 @@ use kassandra_program::{
     instruction::Ix,
     state::{Phase, CLAIM_OPTION_NONE},
 };
-use solana_sdk::{
-    instruction::InstructionError,
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::TransactionError,
-};
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 // ----- instruction builders -------------------------------------------------
 

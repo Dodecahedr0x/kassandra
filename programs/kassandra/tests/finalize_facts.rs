@@ -19,12 +19,12 @@ use kassandra_program::{
     error::KassandraError,
     state::{Phase, VOTE_APPROVE, VOTE_DUPLICATE},
 };
-use solana_sdk::{
-    instruction::{Instruction, InstructionError},
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::TransactionError,
-};
+use solana_instruction::Instruction;
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 // ----- instruction builders -------------------------------------------------
 

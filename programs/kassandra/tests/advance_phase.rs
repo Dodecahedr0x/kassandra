@@ -12,7 +12,9 @@ mod common;
 use common::*;
 
 use kassandra_program::{error::KassandraError, state::Phase};
-use solana_sdk::{instruction::InstructionError, pubkey::Pubkey, transaction::TransactionError};
+use solana_instruction_error::InstructionError;
+use solana_pubkey::Pubkey;
+use solana_transaction_error::TransactionError;
 
 /// PHASE_WINDOW mirrored from the program config (`src/config.rs`).
 const PHASE_WINDOW: i64 = 3600;

@@ -32,13 +32,11 @@ mod common;
 use common::*;
 
 use kassandra_program::cpi::metadao;
-use solana_sdk::{
-    account::Account,
-    compute_budget::ComputeBudgetInstruction,
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signature::Signer,
-};
+use solana_account::Account;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use spl_token::{
     solana_program::{program_option::COption, program_pack::Pack},
     state::{Account as TokenAccount, AccountState},
@@ -46,7 +44,8 @@ use spl_token::{
 };
 
 const AMM_SO: &[u8] = include_bytes!("fixtures/metadao_amm.so");
-const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const ATA_PROGRAM_ID: Pubkey =
+    solana_pubkey::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const MAX_PRICE: u128 = (u64::MAX as u128) * 1_000_000_000_000;
 
 fn amm_id() -> Pubkey {
@@ -112,7 +111,7 @@ fn fabricate_token_account(
 #[test]
 fn remove_liquidity_returns_price_dependent_mix() {
     let mut ctx = TestCtx::new();
-    ctx.svm.add_program(amm_id(), AMM_SO);
+    ctx.svm.add_program(amm_id(), AMM_SO).unwrap();
 
     let payer = ctx.payer.pubkey();
     let base_mint = ctx.kass_mint; // 9 dp
@@ -159,7 +158,7 @@ fn remove_liquidity_returns_price_dependent_mix() {
             AccountMeta::new(vault_ata_quote, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
             AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(amm_event_auth, false),
             AccountMeta::new_readonly(amm_id(), false),
         ],

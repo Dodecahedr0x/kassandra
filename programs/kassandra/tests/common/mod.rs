@@ -47,15 +47,14 @@ use kassandra_program::state::{
     VOTE_APPROVE, VOTE_DUPLICATE,
 };
 use litesvm::{types::TransactionResult, LiteSVM};
-use solana_sdk::{
-    account::Account,
-    clock::Clock,
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    system_program,
-    transaction::Transaction,
-};
+use solana_account::Account;
+use solana_clock::Clock;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 use spl_token::{
     solana_program::{program_option::COption, program_pack::Pack},
     state::{Account as TokenAccount, AccountState, Mint},
@@ -75,7 +74,7 @@ pub const DEADLINE_DELTA: i64 = 1_000;
 /// SPL Associated Token Account program id — the DAO treasury (SW1 sweep target)
 /// is the canonical KASS ATA of `dao_authority`, derived under this program.
 pub const ATA_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+    solana_pubkey::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 /// KASS mint decimals.
 pub const KASS_DECIMALS: u8 = 9;
@@ -262,7 +261,8 @@ impl TestCtx {
         svm.add_program(
             program_id,
             include_bytes!("../../../../target/deploy/kassandra_program.so"),
-        );
+        )
+        .unwrap();
 
         let mut ctx = Self {
             svm,
@@ -1348,7 +1348,7 @@ impl TestCtx {
 
     /// Sign and submit a single-instruction transaction, returning the LiteSVM
     /// result so tests can assert `Ok`/`Err` and introspect the
-    /// [`TransactionError`](solana_sdk::transaction::TransactionError).
+    /// [`TransactionError`](solana_transaction_error::TransactionError).
     ///
     /// The transaction is signed by the payer (fee payer) plus every keypair in
     /// `signers`. The blockhash is expired and re-fetched on each call so that

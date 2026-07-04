@@ -125,8 +125,13 @@ async fn main() -> Result<()> {
     let mut pipeline = Pipeline::builder()
         .datasource(crawler)
         .instruction(
-            KassandraDecoder { program_id: program_id() },
-            KassandraProcessor { client: client.clone(), session: session.clone() },
+            KassandraDecoder {
+                program_id: program_id(),
+            },
+            KassandraProcessor {
+                client: client.clone(),
+                session: session.clone(),
+            },
         )
         .build()?;
 
@@ -139,5 +144,8 @@ async fn main() -> Result<()> {
 }
 
 fn env_num<T: FromStr>(key: &str, default: T) -> T {
-    std::env::var(key).ok().and_then(|s| s.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
 }

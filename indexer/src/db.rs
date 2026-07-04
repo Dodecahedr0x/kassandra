@@ -86,9 +86,14 @@ pub async fn insert_event(client: &Client, e: &Event) -> Result<()> {
 /// The durable resume cursor (signature to pass as the crawler's `until`).
 pub async fn get_cursor(client: &Client) -> Result<Option<(String, i64)>> {
     let rows = client
-        .query("SELECT signature, slot FROM indexer_cursor WHERE id = 1 AND signature IS NOT NULL", &[])
+        .query(
+            "SELECT signature, slot FROM indexer_cursor WHERE id = 1 AND signature IS NOT NULL",
+            &[],
+        )
         .await?;
-    Ok(rows.first().map(|r| (r.get::<_, String>(0), r.get::<_, i64>(1))))
+    Ok(rows
+        .first()
+        .map(|r| (r.get::<_, String>(0), r.get::<_, i64>(1))))
 }
 
 /// Promote the durable resume cursor forward.
@@ -105,7 +110,10 @@ pub async fn set_cursor(client: &Client, signature: &str, slot: i64) -> Result<(
 
 /// `(event_count, cursor)` for the status endpoint.
 pub async fn stats(client: &Client) -> Result<(i64, Option<(String, i64)>)> {
-    let count = client.query_one("SELECT COUNT(*)::bigint FROM events", &[]).await?.get::<_, i64>(0);
+    let count = client
+        .query_one("SELECT COUNT(*)::bigint FROM events", &[])
+        .await?
+        .get::<_, i64>(0);
     Ok((count, get_cursor(client).await?))
 }
 
@@ -125,7 +133,10 @@ pub async fn query_events(
     }
     if let Some(a) = account {
         params.push(Box::new(a.to_string()));
-        where_clauses.push(format!("(account0 = ${0} OR accounts ? ${0})", params.len()));
+        where_clauses.push(format!(
+            "(account0 = ${0} OR accounts ? ${0})",
+            params.len()
+        ));
     }
     if let Some(s) = before_slot {
         params.push(Box::new(s));
@@ -138,8 +149,10 @@ pub async fn query_events(
         if where_clauses.is_empty() { String::new() } else { format!("WHERE {}", where_clauses.join(" AND ")) },
         params.len(),
     );
-    let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-        params.iter().map(|b| b.as_ref() as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+    let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
+        .iter()
+        .map(|b| b.as_ref() as &(dyn tokio_postgres::types::ToSql + Sync))
+        .collect();
     let rows = client.query(&sql, &refs).await?;
     Ok(rows
         .iter()

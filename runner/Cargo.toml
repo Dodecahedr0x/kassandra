@@ -17,44 +17,44 @@ path = "src/main.rs"
 # the `Ix` discriminants, `PROGRAM_ID`, the PDA derivations, and the instruction
 # builders. The program crate is pulled in transitively (with `no-entrypoint`) by
 # the SDK, so there is no cross-crate drift and the runner never names it directly.
-kassandra-sdk = { path = "../sdk-rs" }
+kassandra-sdk = { workspace = true }
 
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-sha2 = "0.10"
+tokio = { workspace = true }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
 # Pod-decode the shared on-chain account structs read over RPC (Task I3).
-bytemuck = { version = "1", features = ["min_const_generics"] }
+bytemuck = { workspace = true }
 # Base58 pubkey <-> bytes (owner verification) + base64 account-data decode for
 # the JSON-RPC getAccountInfo/getProgramAccounts responses (Task I3). Both are
 # small, pure-Rust; no solana-client / solana-sdk pulled in.
-bs58 = "0.5"
-base64 = "0.22"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-clap = { version = "4", features = ["derive"] }
-anyhow = "1"
-thiserror = "2"
-async-trait = "0.1"
+bs58 = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
 
 # Build + SIGN the `submit_ai_claim` transaction with the split, granular
 # solana-* crates (correct legacy-message serialization + ed25519 signing) —
 # deliberately NOT `solana-sdk` / `solana-client`. Send + confirm rides the same
 # reqwest `JsonRpc` transport as the I3 fetch (see `rpc.rs`), so no second RPC
-# stack. `curve25519` on solana-pubkey enables host-side PDA derivation
-# (`find_program_address`); `bincode` on solana-transaction enables the wire
-# serialization + `Transaction::new`/`sign`. These are host-only deps for the
+# stack. `curve25519` on solana-pubkey (workspace dep) enables host-side PDA
+# derivation (`find_program_address`); `bincode` on solana-transaction enables the
+# wire serialization + `Transaction::new`/`sign`. These are host-only deps for the
 # runner binary and do not touch the on-chain (pinocchio) program.
-solana-pubkey = { version = "2", features = ["curve25519"] }
-solana-hash = "2"
-solana-instruction = "2"
-solana-message = "2"
-solana-keypair = "2"
-solana-signer = "2"
-solana-transaction = { version = "2", features = ["bincode"] }
-bincode = "1"
+solana-pubkey = { workspace = true }
+solana-hash = { workspace = true }
+solana-instruction = { workspace = true }
+solana-message = { workspace = true }
+solana-keypair = { workspace = true }
+solana-signer = { workspace = true }
+solana-transaction = { workspace = true }
+bincode = { workspace = true }
 
 [dev-dependencies]
 # The `verify` feature adds `Transaction::verify()` for the offline sign tests
 # (ed25519 signature check against the payer pubkey) without shipping it in the
-# release binary.
-solana-transaction = { version = "2", features = ["bincode", "verify"] }
+# release binary. Layered on top of the workspace dep's `bincode`.
+solana-transaction = { workspace = true, features = ["verify"] }

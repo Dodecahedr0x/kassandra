@@ -84,17 +84,22 @@ services:
   - type: pserv
     name: kassandra-indexer
     runtime: rust
-    # A self-contained Cargo crate (own lockfile), so Render builds only it — no
-    # pull-in of the program's pinned Solana workspace.
-    rootDir: indexer
+    # The indexer is a member of the repo-root Cargo workspace (single lockfile),
+    # so it builds from the root with `-p` — `cargo build` only compiles this
+    # package + its deps (kassandra-sdk → kassandra-program), not the test/runner
+    # crates. Artifacts land in the workspace `target/`, hence no `rootDir`.
     # Private services can't use the free plan (Render restricts free to web
     # services + databases), so the indexer runs on the cheapest paid tier.
     plan: starter
     buildFilter:
       paths:
         - indexer/**
+        - sdk-rs/**
+        - programs/kassandra/**
+        - Cargo.toml
+        - Cargo.lock
         - render.yaml
-    buildCommand: cargo build --release --locked
+    buildCommand: cargo build --release --locked -p kassandra-indexer
     startCommand: ./target/release/kassandra-indexer
     # NOTE: private services (pserv) don't support healthCheckPath — Render only
     # health-checks public web services. The indexer still serves /health; the

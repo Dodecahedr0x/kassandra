@@ -49,7 +49,7 @@ impl<'a> Processor<InstructionProcessorInputType<'a, KassandraIx>> for Kassandra
         // (backlog drained), so a crash mid-backfill re-scans from the last
         // cursor rather than skipping the un-backfilled range.
         let mut s = self.session.lock().await;
-        if s.head.as_ref().map_or(true, |(_, hs)| slot > *hs) {
+        if s.head.as_ref().is_none_or(|(_, hs)| slot > *hs) {
             s.head = Some((signature, slot));
         }
         if slot < s.min_slot {

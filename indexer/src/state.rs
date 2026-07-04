@@ -15,7 +15,10 @@ pub struct Session {
 
 impl Default for Session {
     fn default() -> Self {
-        Session { head: None, min_slot: i64::MAX }
+        Session {
+            head: None,
+            min_slot: i64::MAX,
+        }
     }
 }
 

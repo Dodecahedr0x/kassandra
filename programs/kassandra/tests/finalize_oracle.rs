@@ -18,11 +18,10 @@ use kassandra_program::{
     error::KassandraError,
     state::{Phase, CLAIM_OPTION_NONE},
 };
-use solana_sdk::{
-    instruction::{Instruction, InstructionError},
-    pubkey::Pubkey,
-    transaction::TransactionError,
-};
+use solana_instruction::Instruction;
+use solana_instruction_error::InstructionError;
+use solana_pubkey::Pubkey;
+use solana_transaction_error::TransactionError;
 
 // ----- instruction builder --------------------------------------------------
 

@@ -96,7 +96,11 @@ impl<'a> InstructionDecoder<'a> for KassandraDecoder {
         Some(KassandraIx {
             discriminant,
             name: ix_name(discriminant),
-            accounts: instruction.accounts.iter().map(|a| a.pubkey.to_string()).collect(),
+            accounts: instruction
+                .accounts
+                .iter()
+                .map(|a| a.pubkey.to_string())
+                .collect(),
             data: instruction.data.clone(),
         })
     }
@@ -119,12 +123,17 @@ mod tests {
 
     #[test]
     fn program_id_matches_the_sdk() {
-        assert_eq!(program_id().to_bytes(), kassandra_sdk::PROGRAM_ID.to_bytes());
+        assert_eq!(
+            program_id().to_bytes(),
+            kassandra_sdk::PROGRAM_ID.to_bytes()
+        );
     }
 
     #[test]
     fn decodes_only_kassandra_instructions() {
-        let dec = KassandraDecoder { program_id: program_id() };
+        let dec = KassandraDecoder {
+            program_id: program_id(),
+        };
         let oracle = Pubkey::new_unique();
 
         let ours = Instruction {

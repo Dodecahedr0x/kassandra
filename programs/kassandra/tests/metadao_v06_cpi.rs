@@ -33,14 +33,13 @@
 
 use kassandra_program::cpi::metadao_v06 as md6;
 use litesvm::LiteSVM;
-use solana_sdk::{
-    account::Account,
-    compute_budget::ComputeBudgetInstruction,
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::Transaction,
-};
+use solana_account::Account;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 use spl_token::{
     solana_program::{program_option::COption, program_pack::Pack},
     state::{Account as TokenAccount, AccountState, Mint},
@@ -52,7 +51,8 @@ const VAULT_V06_SO: &[u8] = include_bytes!("fixtures/metadao_conditional_vault_v
 const METEORA_SO: &[u8] = include_bytes!("fixtures/meteora_damm_v2.so");
 const SQUADS_SO: &[u8] = include_bytes!("fixtures/squads_v4.so");
 
-const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const ATA_PROGRAM_ID: Pubkey =
+    solana_pubkey::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 fn futarchy_id() -> Pubkey {
     Pubkey::new_from_array(md6::FUTARCHY_ID.to_bytes())
@@ -68,10 +68,10 @@ fn squads_id() -> Pubkey {
 }
 
 fn load_all(svm: &mut LiteSVM) {
-    svm.add_program(futarchy_id(), FUTARCHY_SO);
-    svm.add_program(vault_id(), VAULT_V06_SO);
-    svm.add_program(meteora_id(), METEORA_SO);
-    svm.add_program(squads_id(), SQUADS_SO);
+    svm.add_program(futarchy_id(), FUTARCHY_SO).unwrap();
+    svm.add_program(vault_id(), VAULT_V06_SO).unwrap();
+    svm.add_program(meteora_id(), METEORA_SO).unwrap();
+    svm.add_program(squads_id(), SQUADS_SO).unwrap();
 }
 
 fn ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
@@ -353,7 +353,7 @@ fn v06_conditional_vault_split() {
         accounts: vec![
             AccountMeta::new(question, false),
             AccountMeta::new(payer.pubkey(), true),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
         ],
@@ -372,7 +372,7 @@ fn v06_conditional_vault_split() {
             AccountMeta::new(payer.pubkey(), true),
             AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(solana_sdk_ids::system_program::ID, false),
             AccountMeta::new_readonly(event_authority, false),
             AccountMeta::new_readonly(vault_id(), false),
             AccountMeta::new(cond0, false),

@@ -9,12 +9,13 @@ use kassandra_program::config::{
     CHALLENGE_SUCCESS_KASS_FEE_NUM, PHASE_WINDOW, THRESHOLD_DEN, THRESHOLD_NUM,
 };
 use kassandra_program::error::KassandraError;
-use solana_sdk::signature::{Keypair, Signer};
+use solana_keypair::Keypair;
+use solana_signer::Signer;
 
 /// Decode a LiteSVM transaction error into its `Custom(u32)` code, if any.
 fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
-    use solana_sdk::instruction::InstructionError;
-    use solana_sdk::transaction::TransactionError;
+    use solana_instruction_error::InstructionError;
+    use solana_transaction_error::TransactionError;
     match res {
         Err(meta) => match &meta.err {
             TransactionError::InstructionError(_, InstructionError::Custom(code)) => Some(*code),
@@ -26,7 +27,7 @@ fn custom_code(res: &litesvm::types::TransactionResult) -> Option<u32> {
 
 /// Init the protocol and hand governance off to a fresh, funded `dao` keypair
 /// that can then sign `set_config`. Returns `(protocol_pda, dao_keypair)`.
-fn governed_ctx() -> (TestCtx, solana_sdk::pubkey::Pubkey, Keypair) {
+fn governed_ctx() -> (TestCtx, solana_pubkey::Pubkey, Keypair) {
     let mut ctx = TestCtx::new();
     // Use ensure_protocol so the harness records the singleton as initialized;
     // a later create_real_oracle then won't try to re-init it.

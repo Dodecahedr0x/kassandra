@@ -19,7 +19,9 @@ use kassandra_program::{
     error::KassandraError,
     state::{Phase, VOTE_APPROVE, VOTE_DUPLICATE},
 };
-use solana_sdk::{instruction::InstructionError, signature::Signer, transaction::TransactionError};
+use solana_instruction_error::InstructionError;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 /// A rich Resolved oracle exercising every matrix row at once. `resolved_option
 /// == 1`. Returns the seed; `slash = 1/2`.
@@ -105,11 +107,11 @@ fn resolved_full(ctx: &mut TestCtx) -> TerminalSeed {
 /// closed, vault decremented by exactly `expected`, rent reclaimed to authority.
 fn assert_claim(
     ctx: &mut TestCtx,
-    ix: solana_sdk::instruction::Instruction,
-    account: solana_sdk::pubkey::Pubkey,
-    dest: solana_sdk::pubkey::Pubkey,
-    stake_vault: solana_sdk::pubkey::Pubkey,
-    recipient: solana_sdk::pubkey::Pubkey,
+    ix: solana_instruction::Instruction,
+    account: solana_pubkey::Pubkey,
+    dest: solana_pubkey::Pubkey,
+    stake_vault: solana_pubkey::Pubkey,
+    recipient: solana_pubkey::Pubkey,
     expected: u64,
 ) {
     let vault_before = ctx.token_balance(stake_vault);
@@ -475,7 +477,7 @@ fn dest_owner_mismatch_rejected() {
     let p = &seed.proposers[0];
 
     // A KASS account owned by a DIFFERENT party cannot receive the payout.
-    let attacker = solana_sdk::signature::Keypair::new();
+    let attacker = solana_keypair::Keypair::new();
     let bad_dest = ctx.fund_kass(&attacker, 0);
 
     let ix = ctx.claim_proposer_ix(

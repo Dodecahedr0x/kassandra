@@ -97,12 +97,12 @@ use kassandra_program::{
     state::{Phase, CLAIM_OPTION_NONE, VOTE_APPROVE, VOTE_DUPLICATE},
 };
 use proptest::prelude::*;
-use solana_sdk::{
-    instruction::{Instruction, InstructionError},
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::TransactionError,
-};
+use solana_instruction::Instruction;
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 // ---------------------------------------------------------------------------
 // Scenario generation

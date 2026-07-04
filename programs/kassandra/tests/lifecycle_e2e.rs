@@ -22,11 +22,10 @@ use kassandra_program::{
     config::PHASE_WINDOW,
     state::{Phase, VOTE_APPROVE},
 };
-use solana_sdk::{
-    instruction::Instruction,
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-};
+use solana_instruction::Instruction;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 // ----- dispute-core instruction builders (mirror the dedicated test files) ---
 

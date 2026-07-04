@@ -14,7 +14,7 @@ bytemuck = { workspace = true }
 # `state::Pubkey` aliases pinocchio's `Address` (a `repr(transparent)` newtype
 # over `[u8; 32]`); the `bytemuck` feature gives it `Pod`/`Zeroable` so the
 # zero-copy account structs keep deriving them.
-solana-address = { version = "2", features = ["bytemuck"] }
+solana-address = { workspace = true, features = ["bytemuck"] }
 
 # The PDA helpers (`Pubkey::find_program_address` / `create_program_address`)
 # are SBF syscalls on-chain but live behind solana-address's `curve25519`
@@ -22,16 +22,30 @@ solana-address = { version = "2", features = ["bytemuck"] }
 # by `cargo test`) compiles; the SBF build takes the syscall path and never
 # pulls curve25519-dalek (it is target-gated to non-Solana).
 [target.'cfg(not(target_os = "solana"))'.dependencies]
-solana-address = { version = "2", features = ["curve25519"] }
+solana-address = { workspace = true, features = ["curve25519"] }
 
 [dev-dependencies]
-litesvm = "0.6"
-solana-sdk = "2"
-spl-token = { version = "6", features = ["no-entrypoint"] }
-proptest = "1"
+litesvm = { workspace = true }
+spl-token = { workspace = true }
+proptest = { workspace = true }
+# Granular solana client crates (v3), replacing the `solana-sdk` meta-crate — it
+# only ships at v4 (→ pubkey v4), which would clash with spl-token 9's pubkey v3.
+solana-pubkey = { workspace = true }
+solana-keypair = { workspace = true }
+solana-signer = { workspace = true }
+solana-instruction = { workspace = true }
+solana-transaction = { workspace = true }
+solana-message = { workspace = true }
+solana-hash = { workspace = true }
+solana-account = { workspace = true }
+solana-clock = { workspace = true }
+solana-instruction-error = { workspace = true }
+solana-transaction-error = { workspace = true }
+solana-sdk-ids = { workspace = true }
+solana-compute-budget-interface = { workspace = true }
 # The Rust client SDK — the test harness builds instructions + derives PDAs
 # through it instead of hand-rolling account metas and payload bytes.
-kassandra-sdk = { path = "../../sdk-rs" }
+kassandra-sdk = { workspace = true }
 
 [features]
 no-entrypoint = []

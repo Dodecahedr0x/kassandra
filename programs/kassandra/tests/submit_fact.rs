@@ -13,12 +13,11 @@ mod common;
 use common::*;
 
 use kassandra_program::{error::KassandraError, instruction::Ix, state::Fact};
-use solana_sdk::{
-    instruction::InstructionError,
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::TransactionError,
-};
+use solana_instruction_error::InstructionError;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 
 /// Encode a `submit_fact` instruction payload.
 fn payload(content_hash: &[u8; 32], stake: u64, uri: &[u8]) -> Vec<u8> {
