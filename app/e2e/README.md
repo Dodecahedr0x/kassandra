@@ -85,6 +85,17 @@ one serial flow over a Challenge-phase oracle:
 | `settleChallenge` | `ChallengeTradeControls` · one-click derive-from-Market settle | ✅ |
 | `closeMarket` | `CloseControl` (after `finalizeOracle` → Resolved) | ✅ |
 
+**Indexer run** (`scripts/e2e-playwright-indexer.sh`) — the whole indexing
+pipeline end to end. `e2e/indexer/global-setup.ts` boots surfpool, seeds an
+oracle with real transactions (create_oracle → propose×2 → finalize_proposals →
+submit_fact), then runs the **actual `kassandra-indexer` binary** (the one
+deployed on Render) against surfpool's RPC + an **ephemeral Postgres**
+(`e2e/indexer/pg.ts` — `initdb`/`pg_ctl` in a temp dir). Once it has crawled the
+activity, the app is loaded with `VITE_INDEXER_URL` pointed at it and the spec
+asserts the on-chain **ActivityFeed** renders those instructions (chain → Carbon
+crawler → Postgres → read API → app). Needs the indexer binary built + the
+postgres binaries on PATH (`PG_BIN` overrides).
+
 The compose form now takes the **challenged proposer** (query-param default) so
 `open_challenge` derives the right `ai_claim`/`market` — previously it wrongly
 passed the connected wallet. `fork/onchain.ts` backdates `Market.twap_end` /

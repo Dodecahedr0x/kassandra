@@ -36,7 +36,7 @@ impl<'a> Processor<InstructionProcessorInputType<'a, KassandraIx>> for Kassandra
             slot,
             block_time: tx.block_time,
             account0: ix.accounts.first().cloned(),
-            accounts_json: serde_json::to_string(&ix.accounts).unwrap_or_else(|_| "[]".to_string()),
+            accounts: serde_json::Value::from(ix.accounts.clone()),
             data_base64: base64::engine::general_purpose::STANDARD.encode(&ix.data),
         };
 

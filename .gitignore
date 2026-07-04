@@ -27,3 +27,4 @@ app/blob-report/
 
 # Rust indexer build output
 indexer/target/
+app/e2e/indexer/.wallet.json

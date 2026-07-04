@@ -42,7 +42,8 @@ pub struct Event {
     pub slot: i64,
     pub block_time: Option<i64>,
     pub account0: Option<String>,
-    pub accounts_json: String,
+    /// The instruction's account list, as a JSONB value (jsonb `?` account lookups).
+    pub accounts: serde_json::Value,
     pub data_base64: String,
 }
 
@@ -64,7 +65,7 @@ pub async fn insert_event(client: &Client, e: &Event) -> Result<()> {
         .execute(
             "INSERT INTO events
                (signature, ix_index, ix_type, discriminant, slot, block_time, account0, accounts, data_base64)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
              ON CONFLICT (signature, ix_index) DO NOTHING",
             &[
                 &e.signature,
@@ -74,7 +75,7 @@ pub async fn insert_event(client: &Client, e: &Event) -> Result<()> {
                 &e.slot,
                 &e.block_time,
                 &e.account0,
-                &e.accounts_json,
+                &e.accounts,
                 &e.data_base64,
             ],
         )
