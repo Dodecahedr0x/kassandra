@@ -204,6 +204,24 @@
   }
 }
 
+/*
+ * Mobile: force form controls to ≥16px. iOS Safari auto-zooms the viewport when
+ * a focused input's font-size is < 16px, which is jarring and breaks the
+ * responsive layout. The Auros design deliberately uses denser 13–14px controls,
+ * so we bump ONLY the actual inputs and ONLY on small screens (≤640px). This
+ * rule sits OUTSIDE any @layer, so it wins over Tailwind's `text-[14px]`
+ * utilities (unlayered styles beat layered ones in the cascade) without needing
+ * to touch every control's class. Checkboxes/radios are exempt (no zoom, and a
+ * size change would distort them).
+ */
+@media (max-width: 640px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 /* Signature gradient fills — reserved for the primary CTA + rare accents. */
 @layer utilities {
   .bg-aurora {

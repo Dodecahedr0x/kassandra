@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useWalletMenu } from '../../lib/standardWallet'
 import { Button } from '../ui'
@@ -20,8 +21,53 @@ const linkFocus =
 
 const linkClass = `font-inter text-[14px] text-bronze transition-colors hover:text-sepia ${linkFocus}`
 
+// The mobile-menu row variant — a full-width, ≥44px-tall tap target (touch
+// guideline) with the same on-brand hover + focus treatment as the inline links.
+const mobileLinkClass =
+  `flex min-h-[44px] items-center font-inter text-[15px] text-bronze transition-colors ` +
+  `hover:text-sepia ${linkFocus}`
+
 function truncateAddress(addr: string): string {
   return `${addr.slice(0, 4)}…${addr.slice(-4)}`
+}
+
+/** Lucide-style hamburger glyph (currentColor, 2px stroke) — no emoji icons. */
+function MenuIcon() {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  )
+}
+
+/** Lucide-style close (×) glyph, matched to {@link MenuIcon}. */
+function CloseIcon() {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  )
 }
 
 /**
@@ -29,13 +75,17 @@ function truncateAddress(addr: string): string {
  * backend, so there's nothing to switch — a static label is shown. In direct mode
  * (dev / e2e) the full RPC selector is available.
  */
-function ClusterSelector() {
+function ClusterSelector({ mobile = false }: { mobile?: boolean }) {
   const { cluster, setCluster, clusters } = useCluster()
+
+  // Desktop: an inline control that only appears at ≥sm. In the mobile menu we
+  // force it visible (and full-width) so the cluster is reachable on phones.
+  const wrap = mobile ? 'flex w-full' : 'hidden sm:inline-flex'
 
   if (isGatewayMode()) {
     return (
       <span
-        className="hidden items-center rounded-button border border-pebble bg-soft-cream px-3 py-2 font-inter text-[13px] text-sepia sm:inline-flex"
+        className={`${wrap} items-center rounded-button border border-pebble bg-soft-cream px-3 py-2 font-inter text-[13px] text-sepia`}
         aria-label="RPC cluster"
       >
         {CLUSTER_LABELS[cluster]}
@@ -44,14 +94,14 @@ function ClusterSelector() {
   }
 
   return (
-    <label className="hidden items-center sm:inline-flex">
+    <label className={`${wrap} items-center`}>
       <span className="sr-only">RPC cluster</span>
       <select
         aria-label="RPC cluster"
         value={cluster}
         onChange={(e) => setCluster(e.target.value as Cluster)}
         className={
-          'cursor-pointer rounded-button border border-pebble bg-soft-cream px-3 py-2 ' +
+          `${mobile ? 'w-full ' : ''}cursor-pointer rounded-button border border-pebble bg-soft-cream px-3 py-2 ` +
           'font-inter text-[13px] text-sepia hover:bg-pebble/60 ' +
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pebble ' +
           'focus-visible:ring-offset-2 focus-visible:ring-offset-soft-cream'
@@ -104,29 +154,62 @@ function ConnectControl() {
 
 /**
  * Auros top bar — soft-cream, a single hairline bottom border, not sticky.
- * Left links · centered serif wordmark · right actions (cluster selector +
- * the real wallet connect control).
+ * ≥md: left links · centered serif wordmark · right actions (cluster selector +
+ * wallet connect). <md: a hamburger toggles a collapsible panel carrying the
+ * primary links + the cluster selector, so navigation stays reachable on phones;
+ * the wordmark + connect control stay in the bar.
  */
 export default function NavBar() {
+  const [open, setOpen] = useState(false)
+  const location = useLocation()
+
+  // Collapse the menu whenever the route (path or in-page anchor) changes, so a
+  // tapped link never leaves the panel hanging open over the destination.
+  useEffect(() => {
+    setOpen(false)
+  }, [location.pathname, location.hash])
+
+  // Escape closes the open menu (a11y escape route).
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
   return (
     <nav aria-label="Primary" className="border-b border-pebble bg-soft-cream">
       <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-4 px-6 py-4">
-        {/* Left: primary links (hidden on small screens) */}
-        <ul className="hidden flex-1 items-center gap-6 md:flex">
-          {NAV_LINKS.map((l) => (
-            <li key={l.label}>
-              {l.route ? (
-                <Link to={l.href} className={linkClass}>
-                  {l.label}
-                </Link>
-              ) : (
-                <a href={l.href} className={linkClass}>
-                  {l.label}
-                </a>
-              )}
-            </li>
-          ))}
-        </ul>
+        {/* Left: hamburger (<md) + primary links (≥md) */}
+        <div className="flex flex-1 items-center">
+          <button
+            type="button"
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-expanded={open}
+            aria-controls="mobile-nav-menu"
+            onClick={() => setOpen((v) => !v)}
+            className={`-ml-2 inline-flex h-11 w-11 items-center justify-center rounded-button text-sepia hover:bg-pebble/60 md:hidden ${linkFocus}`}
+          >
+            {open ? <CloseIcon /> : <MenuIcon />}
+          </button>
+          <ul className="hidden flex-1 items-center gap-6 md:flex">
+            {NAV_LINKS.map((l) => (
+              <li key={l.label}>
+                {l.route ? (
+                  <Link to={l.href} className={linkClass}>
+                    {l.label}
+                  </Link>
+                ) : (
+                  <a href={l.href} className={linkClass}>
+                    {l.label}
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
 
         {/* Center: wordmark */}
         <Link
@@ -142,6 +225,31 @@ export default function NavBar() {
           <ConnectControl />
         </div>
       </div>
+
+      {/* Mobile menu panel — in normal flow beneath the bar (the nav isn't
+          sticky, so it pushes content down rather than overlaying). */}
+      {open ? (
+        <div id="mobile-nav-menu" className="border-t border-pebble md:hidden">
+          <ul className="flex flex-col px-6 py-1">
+            {NAV_LINKS.map((l) => (
+              <li key={l.label}>
+                {l.route ? (
+                  <Link to={l.href} className={mobileLinkClass} onClick={() => setOpen(false)}>
+                    {l.label}
+                  </Link>
+                ) : (
+                  <a href={l.href} className={mobileLinkClass} onClick={() => setOpen(false)}>
+                    {l.label}
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="border-t border-pebble px-6 py-4">
+            <ClusterSelector mobile />
+          </div>
+        </div>
+      ) : null}
     </nav>
   )
 }

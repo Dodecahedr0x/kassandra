@@ -105,7 +105,7 @@ function ToggleChip({
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`rounded-tag border px-3 py-1.5 font-inter text-[13px] font-medium transition-colors ${focusRing} ${
+      className={`rounded-tag border px-3 py-2 font-inter text-[13px] font-medium transition-colors ${focusRing} ${
         active
           ? 'border-sepia/30 bg-soft-cream text-sepia'
           : 'border-pebble bg-transparent text-bronze hover:border-driftwood hover:text-sepia'
