@@ -62,6 +62,17 @@
             ]
           },
           {
+            "group": "Prediction markets",
+            "pages": [
+              "market/overview",
+              "market/lifecycle",
+              "market/crowdfunding",
+              "market/activation",
+              "market/resolution",
+              "market/app"
+            ]
+          },
+          {
             "group": "dApp guide",
             "pages": [
               "app/run-locally",
@@ -122,6 +133,16 @@
             ]
           },
           {
+            "group": "Market protocol",
+            "pages": [
+              "market-protocol/overview",
+              "market-protocol/instructions",
+              "market-protocol/accounts",
+              "market-protocol/pdas",
+              "market-protocol/errors"
+            ]
+          },
+          {
             "group": "SDK",
             "pages": [
               "sdk/overview",
@@ -130,7 +151,8 @@
               "sdk/pdas",
               "sdk/amm-v04",
               "sdk/futarchy",
-              "sdk/recipes"
+              "sdk/recipes",
+              "sdk/market"
             ]
           }
         ]
