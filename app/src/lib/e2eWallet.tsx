@@ -30,7 +30,13 @@ export function E2eWalletProvider({ children }: { children: ReactNode }) {
   const [keypair, setKeypair] = useState<Keypair | null>(null)
 
   useEffect(() => {
-    const secret = typeof window !== 'undefined' ? window.__E2E_WALLET_SECRET__ : undefined
+    // The funded keypair comes from either the Playwright-injected global or,
+    // for interactive `WALLET=funded make dev`, a build-time env var the
+    // orchestrator sets (avoids needing an HTML-injection plugin).
+    const envSecret = (import.meta.env.VITE_E2E_WALLET_SECRET as string | undefined)?.trim()
+    const secret =
+      (typeof window !== 'undefined' ? window.__E2E_WALLET_SECRET__ : undefined) ??
+      (envSecret ? (JSON.parse(envSecret) as number[]) : undefined)
     if (!secret || secret.length === 0) return
     let cancelled = false
     void Keypair.fromSecretKey(new Uint8Array(secret)).then((kp) => {

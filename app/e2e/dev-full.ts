@@ -254,19 +254,25 @@ async function main(): Promise<void> {
     ),
   )
 
-  // ── 4) the app, PRODUCTION-LIKE: real wallet-adapter (NO VITE_E2E) ─────────
-  log('[dev] starting the app (real wallet, local chain + indexer)…')
+  // ── 4) the app ─────────────────────────────────────────────────────────────
+  // Default: PRODUCTION-LIKE — the real wallet-adapter (connect your own wallet).
+  // `WALLET=funded make dev`: auto-connect the pre-funded dev keypair instead
+  // (works today; use it to exercise writes while the real-wallet/kit path is
+  // sorted). The funded keypair is passed to the E2E provider via env.
+  const fundedWallet = process.env.WALLET === 'funded'
+  log(`[dev] starting the app (${fundedWallet ? 'funded auto-connect' : 'real'} wallet)…`)
   const appLog = openLog('app')
   const app: ChildProcess = spawn('pnpm', ['--filter', 'app', 'dev', '--', '--port', String(APP_PORT)], {
     cwd: ROOT,
     env: {
       ...process.env,
-      // Direct RPC to the local node + the local indexer for the ActivityFeed.
-      // NO VITE_E2E → the REAL wallet-adapter is active (connect your own wallet).
       VITE_RPC_URL: rpcUrl,
       VITE_INDEXER_URL: indexerUrl,
       VITE_CLUSTER: 'localnet',
-      VITE_E2E: '',
+      VITE_E2E: fundedWallet ? '1' : '',
+      VITE_E2E_WALLET_SECRET: fundedWallet
+        ? JSON.stringify(Array.from(wallet.secretKey as Uint8Array))
+        : '',
       VITE_MOCK: '',
     },
     stdio: ['ignore', appLog, appLog],
