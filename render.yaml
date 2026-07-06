@@ -78,6 +78,14 @@ services:
       # Oracle event-indexer base (same-origin; the server proxies /indexer/* → indexer).
       - key: VITE_INDEXER_URL
         value: /indexer
+      # Canonical PUBLIC origin baked into each oracle's on-chain metadata `uri`
+      # (`${VITE_APP_ORIGIN}/api/oracle/{oracle}/metadata.json`). It is committed
+      # IMMUTABLY on-chain, so it must be the stable public URL — set it to this
+      # app's canonical origin (e.g. https://kassandra-app.onrender.com or your
+      # custom domain) after the first deploy. Unset → falls back to the browser's
+      # runtime origin (fine for dev only). Build-time (Vite bakes it into the bundle).
+      - key: VITE_APP_ORIGIN
+        sync: false
       # The private indexer's internal address, injected by Render — the app
       # server's proxy target for BOTH /indexer/* and /api/*.
       - key: INDEXER_HOST
@@ -128,6 +136,10 @@ services:
       - key: POLL_INTERVAL_MS
         value: "10000"
       - key: PROMOTE_INTERVAL_MS
+        value: "30000"
+      # Autonomous metadata fetcher: how often to pull + hash-verify + index the
+      # externally-hosted oracle-metadata JSON (any host, not just app POSTs).
+      - key: METADATA_FETCH_INTERVAL_MS
         value: "30000"
       # Market program id (defaults to the known id in-code; pinned for clarity).
       - key: MARKET_PROGRAM_ID

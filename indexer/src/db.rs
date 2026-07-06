@@ -304,3 +304,35 @@ pub async fn get_oracle_meta_json(
         .first()
         .map(|r| (r.get::<_, String>(0), r.get::<_, String>(1))))
 }
+
+/// Oracles that have a non-empty on-chain `uri` but NO stored JSON matching their
+/// `uri_hash` yet — the work list for the autonomous metadata fetcher. Naturally
+/// excludes oracles whose JSON was already POSTed (self-hosted) and keeps failed
+/// fetches in the set so they retry next tick.
+pub async fn oracles_missing_meta_json(
+    client: &Client,
+    limit: i64,
+) -> Result<Vec<(String, String, String)>> {
+    let rows = client
+        .query(
+            "SELECT m.oracle, m.uri, m.uri_hash
+             FROM oracle_metadata m
+             LEFT JOIN oracle_meta_json j
+               ON j.oracle = m.oracle AND j.sha256 = m.uri_hash
+             WHERE m.uri <> '' AND j.oracle IS NULL
+             ORDER BY m.slot DESC
+             LIMIT $1",
+            &[&limit],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            (
+                r.get::<_, String>(0),
+                r.get::<_, String>(1),
+                r.get::<_, String>(2),
+            )
+        })
+        .collect())
+}

@@ -173,7 +173,12 @@ export default function CreateOracle() {
         creator: action.address!,
         kassMint: kassMint.trim(),
         usdcMint: usdcMint.trim(),
-        appOrigin: window.location.origin,
+        // The oracle's metadata `uri` is baked on-chain IMMUTABLY, so it must be the
+        // canonical public origin — NOT whatever origin this browser happens to be on
+        // (a dev localhost or a preview-deploy URL would be frozen on-chain and dead
+        // for everyone else). Configure VITE_APP_ORIGIN in production; fall back to
+        // the runtime origin only in dev.
+        appOrigin: import.meta.env.VITE_APP_ORIGIN || window.location.origin,
         promptTemplate: promptTemplate.trim() || undefined,
         interpretation: interpretation.trim() || undefined,
         category: category.trim() || undefined,

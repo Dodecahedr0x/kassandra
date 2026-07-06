@@ -14,6 +14,7 @@ mod api;
 mod db;
 mod decoder;
 mod market;
+mod meta_fetch;
 mod processor;
 mod state;
 
@@ -53,6 +54,7 @@ async fn main() -> Result<()> {
     let port: u16 = env_num("PORT", 3000);
     let poll_ms: u64 = env_num("POLL_INTERVAL_MS", 10_000);
     let promote_ms: u64 = env_num("PROMOTE_INTERVAL_MS", 30_000);
+    let meta_fetch_ms: u64 = env_num("METADATA_FETCH_INTERVAL_MS", 30_000);
     let commitment = if std::env::var("COMMITMENT").as_deref() == Ok("confirmed") {
         CommitmentConfig::confirmed()
     } else {
@@ -188,6 +190,14 @@ async fn main() -> Result<()> {
                 last_min = s.min_slot;
             }
         });
+    }
+
+    // Autonomous metadata fetcher: pull in externally-hosted oracle-metadata JSON
+    // (any host), verify sha256 == the on-chain uri_hash, and store it — so served
+    // metadata is host-agnostic, not limited to what the app POSTs to us.
+    {
+        let client = client.clone();
+        tokio::spawn(meta_fetch::reconcile_loop(client, meta_fetch_ms));
     }
 
     // The Carbon pipeline over the RPC transaction crawler.
