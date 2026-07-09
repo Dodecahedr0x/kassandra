@@ -11,8 +11,10 @@
  *   runner    a mock Anthropic endpoint so the AI runner produces claims OFFLINE
  *             (no API key, no network); a ready-to-use runner config is written
  *   app       the Vite app in PRODUCTION-LIKE mode: the REAL wallet-adapter (you
- *             connect your own Phantom/Solflare), reading the chain from surfpool
- *             and the ActivityFeed from the local indexer
+ *             connect your own Phantom/Solflare — by default this stack funds your
+ *             local Solana CLI wallet `~/.config/solana/id.json`, so just connect
+ *             it), reading the chain from surfpool and the ActivityFeed from the
+ *             local indexer
  *
  * Each service streams to `logs/<service>.log`. Ctrl-C (SIGINT/SIGTERM) tears the
  * whole thing down — kills every child, stops the ephemeral Postgres, removes its
@@ -25,7 +27,8 @@
  * e2e. A dedicated SQLite backend can be a follow-up if you want zero PG binaries.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { closeSync, mkdirSync, openSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { Keypair } from '@solana/web3.js'
@@ -84,6 +87,26 @@ function base58Encode(bytes: Uint8Array): string {
   }
   for (let i = digits.length - 1; i >= 0; i--) out += ALPHABET[digits[i]]
   return out
+}
+
+/**
+ * The dev wallet: by default the local Solana CLI keypair
+ * (`~/.config/solana/id.json`, override path via `DEV_WALLET_KEYPAIR`), so you
+ * transact from the wallet you already hold — no import step. Falls back to a
+ * freshly generated (and printed) keypair when no local keypair file exists.
+ * Returns the loaded keypair plus whether it came from disk.
+ */
+async function loadDevWallet(): Promise<{ wallet: Keypair; fromFile: boolean }> {
+  const path = process.env.DEV_WALLET_KEYPAIR || join(homedir(), '.config', 'solana', 'id.json')
+  if (existsSync(path)) {
+    try {
+      const secret = Uint8Array.from(JSON.parse(readFileSync(path, 'utf8')) as number[])
+      return { wallet: await Keypair.fromSecretKey(secret), fromFile: true }
+    } catch (e) {
+      log(`[dev] ⚠ could not read ${path} (${(e as Error).message}); generating an ephemeral wallet`)
+    }
+  }
+  return { wallet: await Keypair.generate(), fromFile: false }
 }
 
 const rpcUrl = `http://127.0.0.1:${SURFPOOL_PORT}`
@@ -188,8 +211,10 @@ async function main(): Promise<void> {
   const ctx = await bootAndInit(SURFPOOL_PORT, { wsPort: SURFPOOL_PORT + 1 })
   teardowns.push(() => ctx.harness.teardown())
 
-  // A funded wallet you IMPORT into your browser extension (real-wallet mode).
-  const wallet = await Keypair.generate()
+  // The funded dev wallet: by default your local Solana CLI keypair
+  // (~/.config/solana/id.json), so you transact from the wallet you already hold —
+  // just connect it in the browser (no import). Falls back to a generated keypair.
+  const { wallet, fromFile: walletFromFile } = await loadDevWallet()
   await ctx.harness.airdrop(wallet.publicKey.toString(), 50_000_000_000)
   const walletKass = (
     await associatedTokenAccount(wallet.publicKey.toString(), ctx.kassMint.publicKey.toString())
@@ -360,7 +385,22 @@ async function main(): Promise<void> {
     }
   })
 
-  const secretB58 = base58Encode(wallet.secretKey as Uint8Array)
+  // Only reveal a secret when we GENERATED the wallet — the local CLI keypair is
+  // the user's own; they connect it, we never print its secret.
+  const walletBlock = walletFromFile
+    ? `      ── connect your wallet in the browser ─────────────────────────────
+      The app uses the REAL wallet-adapter. This stack funded your LOCAL
+      Solana CLI wallet (~/.config/solana/id.json) — connect it in the
+      browser and point a custom network at ${rpcUrl}:
+
+        address:          ${wallet.publicKey.toString()}   (funded: SOL + KASS)`
+    : `      ── connect a wallet in the browser ────────────────────────────────
+      The app uses the REAL wallet-adapter. No local Solana CLI keypair was
+      found, so import this generated, pre-funded dev keypair into
+      Phantom/Solflare and point a custom network at ${rpcUrl}:
+
+        secret (base58):  ${base58Encode(wallet.secretKey as Uint8Array)}
+        address:          ${wallet.publicKey.toString()}   (funded: SOL + KASS)`
   log(`
 [dev] ✅ production-like local stack is UP
       app       ${appUrl}          (logs/app.log)
@@ -370,13 +410,7 @@ async function main(): Promise<void> {
       runner    mock Anthropic at ${mock.baseUrl}; config → logs/runner.config.json
       oracles   ${Object.keys(oracles).join(', ')}
 
-      ── connect a wallet in the browser ────────────────────────────────
-      The app uses the REAL wallet-adapter. To transact against this local
-      chain, import this pre-funded dev keypair into Phantom/Solflare and add
-      a custom network pointing at ${rpcUrl}:
-
-        secret (base58):  ${secretB58}
-        address:          ${wallet.publicKey.toString()}   (funded: SOL + KASS)
+${walletBlock}
 
       ── run the AI runner offline ──────────────────────────────────────
         cargo run -p kassandra-runner -- --config logs/runner.config.json \\
