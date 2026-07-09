@@ -41,8 +41,10 @@ import {
   keepWindowOpen,
   openProposals,
   submitOneFact,
+  type SeedCtx,
 } from './seed.ts'
-import { seedMarkets } from './seed-market.ts'
+import { seedMarkets, type ActiveMarketSeed } from './seed-market.ts'
+import { swapOnPool } from './seed-market-active.ts'
 import { startEphemeralPg, type EphemeralPg } from './indexer/pg.ts'
 
 const SURFPOOL_PORT = 8899
@@ -85,6 +87,9 @@ function base58Encode(bytes: Uint8Array): string {
 }
 
 const rpcUrl = `http://127.0.0.1:${SURFPOOL_PORT}`
+// surfpool's websocket (accountSubscribe/programSubscribe) — bound explicitly to
+// RPC port + 1 so the indexer's price subscriber has a deterministic ws url.
+const wsUrl = `ws://127.0.0.1:${SURFPOOL_PORT + 1}`
 const indexerUrl = `http://127.0.0.1:${INDEXER_PORT}`
 const appUrl = `http://localhost:${APP_PORT}`
 
@@ -147,12 +152,40 @@ async function waitForIndexer(minEvents: number, timeoutMs = 60_000): Promise<vo
   log(`[dev] ⚠ indexer did not reach ${minEvents} events in ${timeoutMs}ms (last: ${last}) — continuing`)
 }
 
+/**
+ * Give the active market a non-trivial price history: wait until the indexer's
+ * price subscriber is live (its baseline candle exists), then drive a few swaps
+ * that move the pool up and down. Each swap's pool update is recorded as a candle
+ * point, so the market's chart shows genuine movement in `make dev`.
+ */
+async function seedActivePriceHistory(ctx: SeedCtx, seed: ActiveMarketSeed): Promise<void> {
+  const candlesUrl = `${indexerUrl}/api/markets/${seed.market}/candles?interval=60&limit=5`
+  const deadline = Date.now() + 30_000
+  // 1) Wait until the subscriber has captured its baseline point (⇒ it's subscribed).
+  for (;;) {
+    try {
+      const res = await fetch(candlesUrl)
+      if (res.ok && ((await res.json()) as unknown[]).length >= 1) break
+    } catch {
+      /* indexer/subscriber still coming up */
+    }
+    if (Date.now() > deadline) throw new Error('price subscriber did not produce a baseline candle')
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  // 2) Move the price both ways so the candle has a real range (down → up → down).
+  await swapOnPool(ctx, seed, 'down', 2_000_000_000n)
+  await new Promise((r) => setTimeout(r, 1_200))
+  await swapOnPool(ctx, seed, 'up', 3_000_000_000n)
+  await new Promise((r) => setTimeout(r, 1_200))
+  await swapOnPool(ctx, seed, 'down', 1_000_000_000n)
+}
+
 async function main(): Promise<void> {
   mkdirSync(LOGS, { recursive: true })
 
   // ── 1) surfpool + program + a spread of seeded oracles ─────────────────────
   log('[dev] booting surfpool + deploying the program…')
-  const ctx = await bootAndInit(SURFPOOL_PORT)
+  const ctx = await bootAndInit(SURFPOOL_PORT, { wsPort: SURFPOOL_PORT + 1 })
   teardowns.push(() => ctx.harness.teardown())
 
   // A funded wallet you IMPORT into your browser extension (real-wallet mode).
@@ -203,8 +236,11 @@ async function main(): Promise<void> {
   // must not sink the whole dev stack (the oracle side is already useful).
   log('[dev] deploying the market program + seeding demo markets…')
   let markets: Record<string, unknown> | null = null
+  let activeSeed: ActiveMarketSeed | null = null
   try {
-    markets = await seedMarkets(ctx, oracles)
+    const res = await seedMarkets(ctx, oracles)
+    markets = res.seeded
+    activeSeed = res.active
   } catch (e) {
     log(`[dev] ⚠ market seeding failed (oracle stack still up): ${(e as Error).message}`)
   }
@@ -241,10 +277,13 @@ async function main(): Promise<void> {
       COMMITMENT: 'confirmed',
       POLL_INTERVAL_MS: '1000',
       PROMOTE_INTERVAL_MS: '2000',
-      // The single indexer also runs the market account pipeline. surfpool has no
-      // ws `programSubscribe`, so drive the market side via the getProgramAccounts
-      // reconcile loop (harmless if the market program isn't deployed locally: gpa
-      // just returns no accounts). MARKET_PROGRAM_ID defaults to the known id.
+      // The single indexer also runs the market account pipeline + the per-pool
+      // websocket price subscriber. SOLANA_WS_URL points at surfpool's ws (RPC
+      // port + 1 — surfpool ≥ 1.1.2 implements accountSubscribe/programSubscribe),
+      // so the price subscriber records candle points as the pool trades. A short
+      // getProgramAccounts reconcile also keeps market_accounts fresh (belt + braces
+      // if the ws tail hiccups). MARKET_PROGRAM_ID defaults to the known id.
+      SOLANA_WS_URL: wsUrl,
       INDEXER_RECONCILE_MS: '1000',
       RUST_LOG: 'info',
     },
@@ -252,6 +291,18 @@ async function main(): Promise<void> {
   })
   teardowns.push(() => indexer.kill('SIGKILL'))
   await waitForIndexer(5)
+
+  // Give the active market a real price history: once the indexer's price
+  // subscriber is live (a first candle exists), drive a few swaps that move the
+  // pool so the market's candlestick chart shows genuine movement, not a flat point.
+  if (activeSeed) {
+    try {
+      await seedActivePriceHistory(ctx, activeSeed)
+      log('[dev] seeded price history on the active market (candlestick chart populated)')
+    } catch (e) {
+      log(`[dev] ⚠ price-history seeding skipped: ${(e as Error).message}`)
+    }
+  }
 
   // ── 3) mock Anthropic — the runner's offline model backend ─────────────────
   log('[dev] starting mock Anthropic (runner backend)…')
