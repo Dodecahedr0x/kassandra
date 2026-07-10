@@ -37,19 +37,21 @@ export function parseKassAmount(raw: string): { value?: bigint; error?: string }
 }
 
 /**
- * Additive KASS-balance gate: a message when the entered `amount` can't be
- * covered by `balance`, else `undefined`. A `null` balance (disconnected /
- * loading / transient error) never blocks — the on-chain tx is the ultimate
- * guard. Mirrors the sibling app's `balanceGateError`, formatted at 9 decimals.
+ * Additive balance gate for `asset` (default KASS): a message when the entered
+ * `amount` can't be covered by `balance`, else `undefined`. Selling gates on the
+ * held outcome shares, so callers pass e.g. `"YES shares"` there. A `null`
+ * balance (disconnected / loading / transient error) never blocks — the on-chain
+ * tx is the ultimate guard.
  */
-export function kassBalanceGateError(
+export function balanceGateError(
   amount: bigint | undefined,
   balance: bigint | null,
+  asset = "KASS",
 ): string | undefined {
   if (balance === null) return undefined;
-  if (balance === 0n) return "You have no KASS — you need KASS to participate.";
+  if (balance === 0n) return `You have no ${asset} — you need ${asset} to participate.`;
   if (amount !== undefined && amount > balance) {
-    return "Amount exceeds your KASS balance.";
+    return `Amount exceeds your ${asset} balance.`;
   }
   return undefined;
 }

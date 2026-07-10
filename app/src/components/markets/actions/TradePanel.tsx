@@ -13,7 +13,7 @@ import type { AmmReserves } from "../../../market/data/markets";
 import { useWriteAction } from "../../../market/hooks/useWriteAction";
 import { useKassBalance } from "../../../market/hooks/useKassBalance";
 import { formatKass, formatProbability, impliedYesProbability } from "../../../market/lib/marketView";
-import { parseKassAmount, kassBalanceGateError } from "../../../market/data/amount";
+import { parseKassAmount, balanceGateError } from "../../../market/data/amount";
 import { PriceChart } from "../PriceChart";
 import { ConnectGate } from "./ConnectGate";
 import { Field, KassBalanceLine, SubmitButton, TextInput } from "./formPrimitives";
@@ -99,9 +99,11 @@ export function TradePanel({
   const outcomeProb = outcome === "yes" ? yesProb : yesProb === null ? null : 1 - yesProb;
 
   const positionBalance = outcome === "yes" ? yes.balance : no.balance;
-  // Buy gates on KASS; sell gates on the held leg (both raw base units, 9 dp).
+  // Buy gates on KASS; sell gates on the held outcome shares (both 9 dp). The
+  // gate message names the asset it checks, so selling asks for shares, not KASS.
   const gateBalance = mode === "buy" ? kass.balance : positionBalance;
-  const balanceError = kassBalanceGateError(parsed.value, gateBalance);
+  const gateAsset = mode === "buy" ? "KASS" : `${outcome.toUpperCase()} shares`;
+  const balanceError = balanceGateError(parsed.value, gateBalance, gateAsset);
 
   const buyReceived =
     mode === "buy" && parsed.value ? previewBuy(reserves, outcome, parsed.value).received : null;

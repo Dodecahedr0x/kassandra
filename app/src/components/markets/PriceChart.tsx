@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  CandlestickSeries,
   ColorType,
   CrosshairMode,
+  LineSeries,
   createChart,
   type IChartApi,
   type ISeriesApi,
@@ -23,17 +23,33 @@ const POLL_MS = 15_000;
 
 const CHART_HEIGHT = 280;
 
+/**
+ * Both share curves are probabilities, so the price axis is PINNED to the full
+ * 0..1 (0–100%) range rather than autoscaling to the data — the YES/NO split is
+ * always read against the same fixed scale. Returned from each series'
+ * `autoscaleInfoProvider`.
+ */
+const FULL_SCALE = { priceRange: { minValue: 0, maxValue: 1 } };
+
+/** Percent price format shared by both curves. */
+const PERCENT_FORMAT = {
+  type: "custom" as const,
+  minMove: 0.001,
+  formatter: (v: number) => `${(v * 100).toFixed(1)}%`,
+};
+
 /** Resolve a theme CSS custom property off a live element (falls back to `dflt`). */
 function cssVar(el: HTMLElement, name: string, dflt: string): string {
   return getComputedStyle(el).getPropertyValue(name).trim() || dflt;
 }
 
 /**
- * A candlestick chart of a market's implied YES probability over time, backed by
- * the indexer's price series (`GET /api/markets/{pubkey}/candles`), which the
- * indexer records per-swap from a websocket `accountSubscribe` on the pool. Prices
- * are `0..1` probabilities rendered as percent. The chart is themed from the live
- * Auros CSS variables so it tracks the active palette, and polls for freshness.
+ * A price-history chart of a market's two outcome shares — one curve per share
+ * (YES + its complement NO), each an implied probability line — backed by the
+ * indexer's series (`GET /api/markets/{pubkey}/candles`, recorded per-swap from a
+ * websocket `accountSubscribe` on the pool). The vertical axis is fixed 0–100%
+ * (probabilities span the full range and the two curves always sum to 100%). The
+ * chart is themed from the live Auros CSS variables and polls for freshness.
  *
  * Meaningful only for an Active market (the cYES/cNO pool exists); a market with
  * no points yet renders a quiet empty state rather than a blank frame.
@@ -42,7 +58,8 @@ export function PriceChart({ pubkey }: { pubkey: string }) {
   const indexer = useIndexer();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const yesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const noRef = useRef<ISeriesApi<"Line"> | null>(null);
   const [intervalSecs, setIntervalSecs] = useState<number>(3600);
   const [empty, setEmpty] = useState(false);
   const [error, setError] = useState(false);
@@ -51,8 +68,8 @@ export function PriceChart({ pubkey }: { pubkey: string }) {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const up = cssVar(el, "--color-chestnut", "#8fe9dd");
-    const down = cssVar(el, "--color-ember-orange", "#ff6f61");
+    const yesColor = cssVar(el, "--color-chestnut", "#8fe9dd");
+    const noColor = cssVar(el, "--color-ember-orange", "#ff6f61");
     const text = cssVar(el, "--color-bronze", "#bbc7c6");
     const grid = "rgba(127, 143, 141, 0.16)";
 
@@ -70,21 +87,22 @@ export function PriceChart({ pubkey }: { pubkey: string }) {
       height: CHART_HEIGHT,
       width: Math.floor(el.clientWidth),
     });
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: up,
-      downColor: down,
-      borderUpColor: up,
-      borderDownColor: down,
-      wickUpColor: up,
-      wickDownColor: down,
-      priceFormat: {
-        type: "custom",
-        minMove: 0.001,
-        formatter: (p: number) => `${(p * 100).toFixed(1)}%`,
-      },
+    // One curve per share (YES + NO), both pinned to the 0–100% scale.
+    const yes = chart.addSeries(LineSeries, {
+      color: yesColor,
+      lineWidth: 2,
+      priceFormat: PERCENT_FORMAT,
+      autoscaleInfoProvider: () => FULL_SCALE,
+    });
+    const no = chart.addSeries(LineSeries, {
+      color: noColor,
+      lineWidth: 2,
+      priceFormat: PERCENT_FORMAT,
+      autoscaleInfoProvider: () => FULL_SCALE,
     });
     chartRef.current = chart;
-    seriesRef.current = series;
+    yesRef.current = yes;
+    noRef.current = no;
 
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width;
@@ -96,11 +114,13 @@ export function PriceChart({ pubkey }: { pubkey: string }) {
       ro.disconnect();
       chart.remove();
       chartRef.current = null;
-      seriesRef.current = null;
+      yesRef.current = null;
+      noRef.current = null;
     };
   }, []);
 
-  // Load + poll candles for the selected interval.
+  // Load + poll candles for the selected interval; split each into the YES curve
+  // (the implied YES probability) and the complementary NO curve (1 − YES).
   useEffect(() => {
     let active = true;
     const load = async () => {
@@ -109,14 +129,11 @@ export function PriceChart({ pubkey }: { pubkey: string }) {
         if (!active) return;
         setError(false);
         setEmpty(candles.length === 0);
-        seriesRef.current?.setData(
-          candles.map((c) => ({
-            time: c.time as UTCTimestamp,
-            open: c.open,
-            high: c.high,
-            low: c.low,
-            close: c.close,
-          })),
+        yesRef.current?.setData(
+          candles.map((c) => ({ time: c.time as UTCTimestamp, value: c.close })),
+        );
+        noRef.current?.setData(
+          candles.map((c) => ({ time: c.time as UTCTimestamp, value: 1 - c.close })),
         );
         chartRef.current?.timeScale().fitContent();
       } catch {
@@ -134,9 +151,17 @@ export function PriceChart({ pubkey }: { pubkey: string }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="font-inter text-[12px] text-driftwood">
-          Implied YES probability · history
-        </span>
+        <div className="flex items-center gap-3 font-inter text-[12px]">
+          <span className="text-driftwood">Share price · history</span>
+          <span className="inline-flex items-center gap-1.5 text-sepia">
+            <span className="h-2 w-2 rounded-full bg-chestnut" aria-hidden="true" />
+            YES
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-sepia">
+            <span className="h-2 w-2 rounded-full bg-ember-orange" aria-hidden="true" />
+            NO
+          </span>
+        </div>
         <div
           role="group"
           aria-label="Candle interval"

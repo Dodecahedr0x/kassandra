@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { kassBalanceGateError, parseKassAmount } from '../src/market/data/amount'
+import { balanceGateError, parseKassAmount } from '../src/market/data/amount'
 
 describe('parseKassAmount', () => {
   it('scales human decimals into base units (10^9)', () => {
@@ -36,21 +36,21 @@ describe('parseKassAmount', () => {
   })
 })
 
-describe('kassBalanceGateError', () => {
+describe('balanceGateError', () => {
   it('never blocks on a null balance (disconnected / loading)', () => {
-    expect(kassBalanceGateError(5n, null)).toBeUndefined()
-    expect(kassBalanceGateError(undefined, null)).toBeUndefined()
+    expect(balanceGateError(5n, null)).toBeUndefined()
+    expect(balanceGateError(undefined, null)).toBeUndefined()
   })
 
   it('blocks a zero balance outright', () => {
-    expect(kassBalanceGateError(undefined, 0n)).toMatch(/no kass/i)
-    expect(kassBalanceGateError(1n, 0n)).toMatch(/no kass/i)
+    expect(balanceGateError(undefined, 0n)).toMatch(/no kass/i)
+    expect(balanceGateError(1n, 0n)).toMatch(/no kass/i)
   })
 
   it('blocks only when the amount exceeds the balance', () => {
-    expect(kassBalanceGateError(150n, 100n)).toMatch(/exceeds your kass balance/i)
-    expect(kassBalanceGateError(100n, 100n)).toBeUndefined() // equal is fine
-    expect(kassBalanceGateError(50n, 100n)).toBeUndefined()
-    expect(kassBalanceGateError(undefined, 100n)).toBeUndefined() // nothing entered yet
+    expect(balanceGateError(150n, 100n)).toMatch(/exceeds your kass balance/i)
+    expect(balanceGateError(100n, 100n)).toBeUndefined() // equal is fine
+    expect(balanceGateError(50n, 100n)).toBeUndefined()
+    expect(balanceGateError(undefined, 100n)).toBeUndefined() // nothing entered yet
   })
 })

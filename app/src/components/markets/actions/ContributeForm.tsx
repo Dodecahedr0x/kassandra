@@ -5,7 +5,7 @@ import { buildContributeIxs } from "../../../market/data/actions";
 import { useWriteAction } from "../../../market/hooks/useWriteAction";
 import { useKassBalance } from "../../../market/hooks/useKassBalance";
 import { formatKass } from "../../../market/lib/marketView";
-import { parseKassAmount, kassBalanceGateError } from "../../../market/data/amount";
+import { parseKassAmount, balanceGateError } from "../../../market/data/amount";
 import { ConnectGate } from "./ConnectGate";
 import { Field, KassBalanceLine, SubmitButton, TextInput } from "./formPrimitives";
 import { WriteStatusRegion } from "./WriteStatusRegion";
@@ -33,7 +33,7 @@ export function ContributeForm({
 
   const [amount, setAmount] = useState("");
   const [amountError, setAmountError] = useState<string | undefined>();
-  const balanceError = kassBalanceGateError(parseKassAmount(amount).value, balance);
+  const balanceError = balanceGateError(parseKassAmount(amount).value, balance);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();

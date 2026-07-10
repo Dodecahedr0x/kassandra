@@ -9,7 +9,7 @@ import { useActionSequence, type StepStatus } from "../../../market/hooks/useAct
 import { useConfig } from "../../../market/hooks/useMarketDetail";
 import { useKassBalance } from "../../../market/hooks/useKassBalance";
 import { formatKass, outcomeLabel } from "../../../market/lib/marketView";
-import { parseKassAmount, kassBalanceGateError } from "../../../market/data/amount";
+import { parseKassAmount, balanceGateError } from "../../../market/data/amount";
 import { ConnectGate } from "./ConnectGate";
 import { Field, KassBalanceLine, SubmitButton, TextInput } from "./formPrimitives";
 import { WriteStatusRegion } from "./WriteStatusRegion";
@@ -128,7 +128,7 @@ export function CreateMarketForm() {
     batchMode && parsedSeed.value !== undefined && typeof optionsCount === "number"
       ? parsedSeed.value * BigInt(optionsCount)
       : undefined;
-  const balanceError = kassBalanceGateError(
+  const balanceError = balanceGateError(
     batchMode ? totalCost : parsedSeed.value,
     balance,
   );
