@@ -12,7 +12,7 @@
  */
 import { type TransactionInstruction } from "@solana/web3.js";
 
-import { closeMarket as buildCloseMarket } from "../instructions/market.js";
+import { closeMarket as buildCloseMarket } from "../instructions/market/index.js";
 import type { AddressInput } from "../pda.js";
 
 export interface CloseMarketFlowParams {

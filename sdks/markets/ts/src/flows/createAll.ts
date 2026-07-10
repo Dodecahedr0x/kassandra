@@ -16,7 +16,7 @@
  */
 import { Address, type TransactionInstruction } from "@solana/web3.js";
 
-import { createMarket } from "../instructions/market.js";
+import { createMarket } from "../instructions/market/index.js";
 import * as pda from "../pda.js";
 import type { AddressInput } from "../pda.js";
 

@@ -14,7 +14,7 @@
 import { type TransactionInstruction } from "@solana/web3.js";
 
 import { EXTERNAL_PROGRAM_IDS } from "../constants.js";
-import { collectFee as buildCollectFee } from "../instructions/market.js";
+import { collectFee as buildCollectFee } from "../instructions/market/index.js";
 import type { AddressInput } from "../pda.js";
 import type { MarketRefs } from "./compose.js";
 

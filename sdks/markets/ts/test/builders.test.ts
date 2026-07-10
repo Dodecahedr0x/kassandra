@@ -37,7 +37,7 @@ import {
   refund,
   resolveMarket,
   updateConfig,
-} from "../src/instructions/market.js";
+} from "../src/instructions/market/index.js";
 import { decodeConfig } from "../src/accounts/config.js";
 import { decodeContribution } from "../src/accounts/contribution.js";
 import { decodeMarket } from "../src/accounts/market.js";

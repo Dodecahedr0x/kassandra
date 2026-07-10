@@ -37,7 +37,7 @@ import {
   refund,
   resolveMarket,
   updateConfig,
-} from "../src/instructions/market.js";
+} from "../src/instructions/market/index.js";
 import { addLiquidity, crankThatTwap, createAmm, swap } from "../src/metadao/amm.js";
 import {
   initializeConditionalVault,
