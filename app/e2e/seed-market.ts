@@ -293,15 +293,19 @@ export async function seedMarkets(
     seeded.categoricalOracle = oracles.proposal.address
     seeded.categoricalMarkets = categorical
   }
-  // A 2-option oracle → a spread across the market lifecycle:
-  //   • outcome 0: funded to the floor, then composed + ACTIVATED → a live cYES/cNO
+  // ONE MARKET PER (binary) ORACLE — never two sub-markets on the same oracle,
+  // which would show as two separate, redundant market cards. The lifecycle demo
+  // is spread across DISTINCT oracles instead:
+  //   • factProposal oracle → outcome 0, composed + ACTIVATED → a live cYES/cNO
   //     pool. `make dev` must always surface at least one tradable + funded market
   //     (the app renders the trade panel for an Active market). Created WITH a split
   //     inventory so the caller can drive swaps that populate the price chart.
-  //   • outcome 1: funded to the floor but left in Funding — the "ready to activate"
-  //     state, so the Activate flow is still demoable.
+  //   • factVoting oracle → outcome 0, funded to the floor but left in Funding —
+  //     the "ready to activate" state, so the Activate flow is still demoable.
+  // (The 3-option proposal oracle above is the categorical GROUP — its sub-markets
+  // are grouped into one market in the UI, so it is not "more than one per oracle".)
   // Activation is best-effort: if the MetaDAO compose/activate CPI fails, fall back
-  // to leaving outcome 0 funded-but-inactive so the rest of the seed still stands.
+  // to leaving the factProposal market funded-but-inactive so the rest still stands.
   let active: ActiveMarketSeed | null = null
   if (oracles.factProposal?.address) {
     log('creating + activating a tradable market (outcome 0) on the disputed oracle')
@@ -321,7 +325,10 @@ export async function seedMarkets(
       console.warn(`[dev] ⚠ market activation failed, seeding a funded market instead: ${(e as Error).message}`)
       seeded.fundedMarket = await createOne(oracles.factProposal.address, 0, MIN_LIQUIDITY)
     }
-    seeded.activatableMarket = await createOne(oracles.factProposal.address, 1, MIN_LIQUIDITY)
+  }
+  if (oracles.factVoting?.address) {
+    log('creating a floor-funded, activatable market (outcome 0) on the fact-voting oracle')
+    seeded.activatableMarket = await createOne(oracles.factVoting.address, 0, MIN_LIQUIDITY)
   }
 
   return { seeded, active }

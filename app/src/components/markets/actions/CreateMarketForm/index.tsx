@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Address } from "@solana/web3.js";
 import { decodeMarketOracle, pda } from "@kassandra-market/markets";
 import { Card } from "../../../ui";
@@ -8,6 +8,7 @@ import { useWriteAction } from "../../../../market/hooks/useWriteAction";
 import { useActionSequence } from "../../../../market/hooks/useActionSequence";
 import { useConfig } from "../../../../market/hooks/useMarketDetail";
 import { useKassBalance } from "../../../../market/hooks/useKassBalance";
+import { useMarkets } from "../../../../market/hooks/useMarkets";
 import { formatKass, outcomeLabel } from "../../../../market/lib/marketView";
 import { parseKassAmount, balanceGateError } from "../../../../market/data/amount";
 import { ConnectGate } from "../ConnectGate";
@@ -119,6 +120,17 @@ export function CreateMarketForm() {
 
   const isCategorical = typeof optionsCount === "number" && optionsCount > 2;
 
+  // One market per oracle: if the entered oracle already has a market (any of its
+  // sub-markets), block creating a redundant one.
+  const { data: allMarkets } = useMarkets();
+  const existingMarket = useMemo(
+    () =>
+      trimmedOracle === ""
+        ? undefined
+        : allMarkets?.find((m) => m.market.oracle.toString() === trimmedOracle),
+    [allMarkets, trimmedOracle],
+  );
+
   // Batch mode only makes sense for a categorical oracle; drop it otherwise.
   useEffect(() => {
     if (!isCategorical) setBatchMode(false);
@@ -141,6 +153,10 @@ export function CreateMarketForm() {
   const validate = (): { seedValue: bigint } | null => {
     if (trimmedOracle === "") {
       setOracleError("Enter the Kassandra oracle address.");
+      return null;
+    }
+    if (existingMarket) {
+      setOracleError("This oracle already has a market.");
       return null;
     }
     if (parsedSeed.error) {
@@ -243,9 +259,22 @@ export function CreateMarketForm() {
             )}
           </Field>
 
+          {/* Redundant-market guard: one market per oracle. */}
+          {existingMarket ? (
+            <div className="rounded-tag border border-ember-orange/40 bg-ember-orange/10 px-3 py-2">
+              <p className="font-inter text-[13px] text-ember-orange">
+                This oracle already has a market.{" "}
+                <Link to={`/markets/${existingMarket.pubkey}`} className="underline">
+                  View it
+                </Link>
+                {" — "}one market per oracle.
+              </p>
+            </div>
+          ) : null}
+
           {/* Mode toggle — only for a categorical (N>2) oracle: create one outcome
               at a time, or create all N in one resumable sequence. */}
-          {isCategorical ? (
+          {isCategorical && !existingMarket ? (
             <div
               role="radiogroup"
               aria-label="Create mode"
@@ -349,7 +378,7 @@ export function CreateMarketForm() {
               <div className="flex items-center gap-3">
                 <button
                   type="submit"
-                  disabled={seq.busy || seq.allDone || Boolean(balanceError)}
+                  disabled={seq.busy || seq.allDone || Boolean(balanceError) || Boolean(existingMarket)}
                   aria-busy={seq.busy}
                   className="inline-flex items-center justify-center gap-2 rounded-button bg-chestnut px-4 py-2.5 font-inter text-body font-medium text-liquid-abyss shadow-bloom transition-all duration-150 hover:-translate-y-px hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-phosphor focus-visible:ring-offset-2 focus-visible:ring-offset-parchment disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -368,7 +397,7 @@ export function CreateMarketForm() {
                 <SubmitButton
                   verb="Create market"
                   status={action.status}
-                  disabled={Boolean(balanceError)}
+                  disabled={Boolean(balanceError) || Boolean(existingMarket)}
                 />
               </div>
               <WriteStatusRegion status={action.status} successVerb="Market created" />
