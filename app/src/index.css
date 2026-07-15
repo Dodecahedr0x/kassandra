@@ -277,6 +277,17 @@
     transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
+  /* Connector line between an oracle card and the market that uses it — a faint
+   * dashed overlay that flows along the link (bioluminescent "data" feel). */
+  .hero-link-flow {
+    animation: hero-link-flow 1.6s linear infinite;
+  }
+  @keyframes hero-link-flow {
+    to {
+      stroke-dashoffset: -21;
+    }
+  }
+
   /* The bioluminescent orb that tracks the cursor across the hero. Kept large
    * and very soft so its falloff reaches full transparency well before any box
    * edge — no visible rectangle/seam even when the cursor is at a corner. */
@@ -287,6 +298,11 @@
       rgba(203, 255, 252, 0.045) 34%,
       transparent 72%
     );
+    /* Fade the orb toward the hero's bottom so its glow is fully gone before the
+     * overflow-clip edge — no visible horizontal seam when the cursor nears the
+     * bottom. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent 88%);
+    mask-image: linear-gradient(to bottom, #000 50%, transparent 88%);
     transition: background 0.25s ease-out;
   }
 }
@@ -308,5 +324,8 @@
   }
   .cursor-orb {
     transition: none !important;
+  }
+  .hero-link-flow {
+    animation: none !important;
   }
 }

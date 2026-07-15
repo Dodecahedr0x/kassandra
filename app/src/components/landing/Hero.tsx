@@ -1,144 +1,162 @@
-import type { CSSProperties, ReactNode } from 'react'
-import { AvatarBubble, Button, Reveal } from '../ui'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Link } from 'react-router-dom'
+import { Button, Reveal } from '../ui'
 import { usePointerField } from '../../hooks/usePointerField'
+import { useOracles } from '../../hooks/useOracles'
+import { useMarkets } from '../../market/hooks/useMarkets'
+import { useOracleMeta } from '../../hooks/useOracleMeta'
+import {
+  buildHeroCards,
+  heroConnections,
+  metaKeysFor,
+  type HeroCard,
+  type HeroTone,
+} from '../../lib/heroFeed'
 
-interface QuestionCardData {
-  name: string
-  role: string
-  verified?: boolean
-  question: string
-  /** A short verdict / confidence line; the punchy fragment is highlighted in ember. */
-  verdict?: ReactNode
-  /** Desktop-only absolute placement (the scatter). Ignored in the mobile flow grid. */
-  pos: string
-  /** Parallax depth in px — how far this card drifts toward the cursor (foreground = larger). */
-  depth: number
-}
-
-/**
- * The "orbiting voices" of the constellation — living-looking oracle questions
- * and mini verdicts. Each is a flat card (16px radius, hairline border): an
- * AvatarBubble + a name/role line + a one-line question + an optional verdict
- * with the punchy word/number in the lavender-phosphor accent. Each carries a
- * `depth` so the cards drift at different rates under the cursor (parallax).
- */
-const CARDS: QuestionCardData[] = [
-  {
-    name: 'Cassandra Vela',
-    role: 'Proposer',
-    verified: true,
-    question: 'Did protocol X ship mainnet by Jun 30?',
-    verdict: (
-      <>
-        Proposed: <span className="text-lavender-phosphor">Yes</span> · bond posted
-      </>
-    ),
-    pos: 'lg:top-[24px] lg:left-0',
-    depth: 12,
-  },
-  {
-    name: 'Runner Node',
-    role: 'AI Resolver',
-    verified: true,
-    question: 'Rerunning the pinned model over the agreed facts.',
-    verdict: (
-      <>
-        Confidence <span className="text-lavender-phosphor">96%</span> · hash committed
-      </>
-    ),
-    pos: 'lg:top-[8px] lg:right-[16px]',
-    depth: 7,
-  },
-  {
-    name: 'Milo Trent',
-    role: 'Challenger',
-    question: 'Disputing the CPI count — bond in escrow.',
-    verdict: <>Challenge window: open</>,
-    pos: 'lg:top-[286px] lg:left-0',
-    depth: 9,
-  },
-  {
-    name: 'Ada North',
-    role: 'Staker',
-    question: 'Backed the honest side of the market.',
-    verdict: (
-      <>
-        Settlement <span className="text-lavender-phosphor">+2.4%</span>
-      </>
-    ),
-    pos: 'lg:top-[300px] lg:right-0',
-    depth: 13,
-  },
-  {
-    name: 'Grants DAO',
-    role: 'Proposer',
-    question: 'Will the milestone verify on-chain by epoch end?',
-    pos: 'lg:bottom-[8px] lg:left-[96px]',
-    depth: 6,
-  },
-  {
-    name: 'Facts Registry',
-    role: 'AI Resolver',
-    verified: true,
-    question: 'Verdict committed over the agreed facts.',
-    verdict: (
-      <>
-        Resolved: <span className="text-lavender-phosphor">No</span>
-      </>
-    ),
-    pos: 'lg:bottom-[28px] lg:right-[120px]',
-    depth: 10,
-  },
+/** Desktop scatter slot: absolute placement + parallax drift depth (foreground = larger). */
+const POSITIONS: { pos: string; depth: number }[] = [
+  { pos: 'lg:top-[24px] lg:left-0', depth: 12 },
+  { pos: 'lg:top-[8px] lg:right-[16px]', depth: 7 },
+  { pos: 'lg:top-[286px] lg:left-0', depth: 9 },
+  { pos: 'lg:top-[300px] lg:right-0', depth: 13 },
+  { pos: 'lg:bottom-[8px] lg:left-[96px]', depth: 6 },
+  { pos: 'lg:bottom-[28px] lg:right-[120px]', depth: 10 },
 ]
 
-function QuestionCard({ card, index }: { card: QuestionCardData; index: number }) {
+/** Chip color per tone — subtle Auros hairlines, ember reserved for the Challenge moment. */
+const TONE_CLASSES: Record<HeroTone, string> = {
+  neutral: 'border-pebble text-silver-mist',
+  info: 'border-cyan-phosphor/30 text-cyan-phosphor',
+  accent: 'border-lavender-phosphor/30 text-lavender-phosphor',
+  ember: 'border-ember-orange/40 text-ember-orange',
+  confirmed: 'border-chestnut/40 text-chestnut',
+  muted: 'border-pebble text-stone',
+}
+
+/** A loading placeholder in a scatter slot — shown only while live data is still fetching. */
+function SkeletonCard({ index }: { index: number }) {
+  const slot = POSITIONS[index]
+  return (
+    <div className={'w-full lg:absolute lg:w-[248px] ' + slot.pos} aria-hidden="true">
+      <div className="drift" style={{ '--drift-depth': `${slot.depth}px` } as CSSProperties}>
+        <div className="animate-pulse rounded-card border border-pebble bg-pure-card p-4 motion-reduce:animate-none">
+          <div className="flex items-center justify-between gap-2">
+            <div className="h-2.5 w-14 rounded bg-white/10" />
+            <div className="h-4 w-16 rounded-tag bg-white/10" />
+          </div>
+          <div className="mt-4 h-3 w-full rounded bg-white/10" />
+          <div className="mt-2 h-3 w-2/3 rounded bg-white/10" />
+          <div className="mt-3 h-3 w-1/2 rounded bg-white/10" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ConstellationCard({ card, index }: { card: HeroCard; index: number }) {
+  const slot = POSITIONS[index]
   return (
     // Outer: absolute scatter position + staggered scroll-reveal entrance.
-    <Reveal
-      className={'w-full lg:absolute lg:w-[248px] ' + card.pos}
-      delay={index * 90}
-    >
+    // data-slot lets the connector overlay measure this card's base box.
+    <Reveal className={'w-full lg:absolute lg:w-[248px] ' + slot.pos} delay={index * 90} data-slot={index}>
       {/* Inner: pointer parallax drift (kept off the reveal element so the two
           transforms don't clash). */}
-      <div className="drift" style={{ '--drift-depth': `${card.depth}px` } as CSSProperties}>
-        <article
-          className={
-            'rounded-card border border-pebble bg-pure-card p-4 ' +
-            'transition-[transform,border-color,box-shadow] duration-200 ' +
-            'hover:-translate-y-1 hover:border-cyan-phosphor/40'
-          }
+      <div className="drift" style={{ '--drift-depth': `${slot.depth}px` } as CSSProperties}>
+        <Link
+          to={card.href}
+          className="group block rounded-card border border-pebble bg-pure-card p-4 transition-[transform,border-color] duration-200 hover:-translate-y-1 hover:border-cyan-phosphor/40 focus-visible:outline-none focus-visible:border-cyan-phosphor/60"
         >
-          <div className="flex items-center gap-3">
-            <AvatarBubble name={card.name} size={44} verified={card.verified} />
-            <div className="min-w-0">
-              <p className="truncate font-inter text-[13px] font-medium text-sepia">{card.name}</p>
-              <p className="font-inter text-[12px] text-driftwood">{card.role}</p>
-            </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="label-eyebrow font-inter text-[11px] text-silver-mist">{card.kind}</span>
+            <span
+              className={
+                'rounded-tag border px-2 py-0.5 font-inter text-[10px] font-medium uppercase tracking-[0.08em] ' +
+                TONE_CLASSES[card.tone]
+              }
+            >
+              {card.status}
+            </span>
           </div>
-          <p className="mt-3 font-inter text-[14px] leading-snug text-charcoal-bark">
-            {card.question}
+          <p className="mt-3 line-clamp-2 font-inter text-[14px] leading-snug text-charcoal-bark">
+            {card.title}
           </p>
-          {card.verdict ? (
-            <p className="mt-2 font-inter text-[13px] font-medium text-bronze">{card.verdict}</p>
-          ) : null}
-        </article>
+          <p className="mt-2 font-inter text-[13px] font-medium tabular-nums text-bronze">
+            <span className="text-lavender-phosphor">{card.metricAccent}</span> {card.metricLabel}
+          </p>
+        </Link>
       </div>
     </Reveal>
   )
 }
 
 /**
- * Hero — the signature Auros constellation, now cursor-reactive. A centered
- * two-line display headline surrounded by scattered question cards ("orbiting
- * voices"). A bioluminescent orb tracks the cursor across the field, and every
- * card drifts toward the pointer at its own depth for a parallax-in-water feel.
- * Desktop: cards are absolutely positioned around the headline. Mobile: the
- * whole thing collapses to a vertical stack (headline first) + a 1/2-col grid.
- * All motion is transform/opacity only and disabled under prefers-reduced-motion
- * (see usePointerField + the `.reveal`/`.drift` utilities).
+ * Hero — the signature Auros constellation, now backed by LIVE protocol data:
+ * the top oracles by stake and top markets by liquidity, interleaved as scattered
+ * cards (see heroFeed). A bioluminescent orb tracks the cursor and each card
+ * drifts toward it at its own depth. When a displayed market uses a displayed
+ * oracle, a connector line links the two. While the first fetch is in flight,
+ * loading skeletons fill the slots (never fabricated cards). Desktop: cards are
+ * absolutely scattered around the headline; mobile: a stacked grid. All motion is
+ * transform/opacity only and disabled under prefers-reduced-motion.
  */
 export default function Hero() {
   const fieldRef = usePointerField<HTMLElement>()
+  const { data: oracles, loading: oraclesLoading } = useOracles()
+  const { data: markets, loading: marketsLoading } = useMarkets()
+
+  // Subjects for the featured accounts — one batched indexer call, keyed off the
+  // ranked set so it refetches only when the top oracles/markets change.
+  const metaKeys = useMemo(() => metaKeysFor(oracles ?? [], markets ?? []), [oracles, markets])
+  const meta = useOracleMeta(metaKeys)
+
+  // ONLY real accounts — the top oracles by stake + markets by liquidity,
+  // interleaved (never fabricated example cards).
+  const cards = useMemo(
+    () => buildHeroCards(oracles ?? [], markets ?? [], meta).slice(0, 6),
+    [oracles, markets, meta],
+  )
+  // While the first fetch is in flight and nothing has arrived yet, show loading
+  // skeletons rather than fake content.
+  const showSkeletons = cards.length === 0 && (oraclesLoading || marketsLoading)
+
+  // Connect an oracle card to a market card when the market uses that oracle and
+  // both are on screen. We measure the cards' BASE boxes (offsetLeft/Top ignore
+  // the reveal/drift CSS transforms) and draw an SVG connector between centers.
+  const containerRef = useRef<HTMLDivElement>(null)
+  const connections = useMemo(() => heroConnections(cards), [cards])
+  const [links, setLinks] = useState<{ x1: number; y1: number; x2: number; y2: number }[]>([])
+
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container || connections.length === 0) {
+      setLinks([])
+      return
+    }
+    const measure = () => {
+      const slot = new Map<number, HTMLElement>()
+      container.querySelectorAll<HTMLElement>('[data-slot]').forEach((el) => {
+        slot.set(Number(el.dataset.slot), el)
+      })
+      const center = (el: HTMLElement) => ({
+        x: el.offsetLeft + el.offsetWidth / 2,
+        y: el.offsetTop + el.offsetHeight / 2,
+      })
+      const next: { x1: number; y1: number; x2: number; y2: number }[] = []
+      for (const [o, m] of connections) {
+        const oEl = slot.get(o)
+        const mEl = slot.get(m)
+        if (!oEl || !mEl) continue
+        const a = center(oEl)
+        const b = center(mEl)
+        next.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y })
+      }
+      setLinks(next)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(container)
+    return () => ro.disconnect()
+  }, [connections])
 
   return (
     <section
@@ -152,7 +170,43 @@ export default function Hero() {
           above), so its soft falloff never shows a box edge mid-content. */}
       <div aria-hidden="true" className="cursor-orb pointer-events-none absolute inset-0 z-0" />
 
-      <div className="relative z-10 mx-auto max-w-[1200px] lg:min-h-[680px]">
+      <div ref={containerRef} className="relative z-10 mx-auto max-w-[1200px] lg:min-h-[680px]">
+        {/* Connector overlay — thin bioluminescent lines linking each oracle card to
+            the market that uses it (desktop scatter only; painted under the cards). */}
+        {links.length > 0 ? (
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 hidden h-full w-full lg:block"
+          >
+            {links.map((l, i) => (
+              <g key={i}>
+                <line
+                  x1={l.x1}
+                  y1={l.y1}
+                  x2={l.x2}
+                  y2={l.y2}
+                  stroke="rgba(43,214,199,0.28)"
+                  strokeWidth={1.5}
+                  strokeLinecap="round"
+                />
+                <line
+                  x1={l.x1}
+                  y1={l.y1}
+                  x2={l.x2}
+                  y2={l.y2}
+                  className="hero-link-flow"
+                  stroke="rgba(203,255,252,0.55)"
+                  strokeWidth={1}
+                  strokeLinecap="round"
+                  strokeDasharray="1.5 9"
+                />
+                <circle cx={l.x1} cy={l.y1} r={2.5} fill="rgba(203,255,252,0.7)" />
+                <circle cx={l.x2} cy={l.y2} r={2.5} fill="rgba(203,255,252,0.7)" />
+              </g>
+            ))}
+          </svg>
+        ) : null}
+
         {/* Headline layer — first in DOM (mobile order), centered overlay on desktop.
             Drifts gently OPPOSITE the cards (negative depth) for layered depth. */}
         <div className="relative z-10 mx-auto flex max-w-[680px] flex-col items-center text-center lg:absolute lg:inset-0 lg:justify-center">
@@ -182,14 +236,17 @@ export default function Hero() {
           </div>
         </div>
 
-        {/* Cards layer — static grid on mobile, absolute scatter on desktop. */}
+        {/* Cards layer — live oracles/markets only. Static grid on mobile, absolute scatter on desktop. */}
         <div
-          aria-label="Example oracle questions and verdicts"
+          aria-label="Featured live oracles and markets"
+          aria-busy={showSkeletons}
           className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:mt-0 lg:block"
         >
-          {CARDS.map((card, i) => (
-            <QuestionCard key={card.name} card={card} index={i} />
-          ))}
+          {cards.length > 0
+            ? cards.map((card, i) => <ConstellationCard key={card.id} card={card} index={i} />)
+            : showSkeletons
+              ? POSITIONS.map((_, i) => <SkeletonCard key={i} index={i} />)
+              : null}
         </div>
       </div>
     </section>
