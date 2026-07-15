@@ -10,7 +10,15 @@ import { Phase } from '@kassandra-market/oracles'
 import type { OracleSummary } from '../src/data/oracles'
 import type { MarketSummary } from '../src/market/data/markets'
 import type { OracleMetaView } from '../src/hooks/useOracleMeta'
-import { buildHeroCards, interleave, metaKeysFor, rankMarkets, rankOracles } from '../src/lib/heroFeed'
+import {
+  buildHeroCards,
+  heroConnections,
+  interleave,
+  metaKeysFor,
+  rankMarkets,
+  rankOracles,
+  type HeroCard,
+} from '../src/lib/heroFeed'
 
 function oracle(pubkey: string, stake: bigint, phase: Phase = Phase.Proposal): OracleSummary {
   return {
@@ -88,5 +96,43 @@ describe('buildHeroCards', () => {
     const cards = buildHeroCards([oracle('OracleWithNoSubject01', 1n)], [], new Map())
     expect(cards[0].title).toMatch(/^Oracle /)
     expect(cards[0].title).toContain('…') // truncated real pubkey, not a generic sentence
+  })
+
+  it('tags each card with its linked oracle id', () => {
+    const cards = buildHeroCards([oracle('o-1', 1n)], [market('m-1', 'o-1', 1n)], new Map())
+    expect(cards[0]).toMatchObject({ kind: 'oracle', oracleId: 'o-1' })
+    expect(cards[1]).toMatchObject({ kind: 'market', oracleId: 'o-1' })
+  })
+})
+
+describe('heroConnections', () => {
+  const card = (id: string, kind: 'oracle' | 'market', oracleId: string): HeroCard =>
+    ({ id, kind, oracleId }) as HeroCard
+
+  it('pairs a market with its oracle when both are displayed', () => {
+    // slots: 0 oracle(o-1), 1 market(→o-1), 2 oracle(o-2), 3 market(→zzz)
+    const cards = [
+      card('o-1', 'oracle', 'o-1'),
+      card('m-1', 'market', 'o-1'),
+      card('o-2', 'oracle', 'o-2'),
+      card('m-2', 'market', 'zzz'), // oracle not displayed → no connection
+    ]
+    expect(heroConnections(cards)).toEqual([[0, 1]])
+  })
+
+  it('connects one oracle to multiple of its displayed markets', () => {
+    const cards = [
+      card('o-1', 'oracle', 'o-1'),
+      card('m-a', 'market', 'o-1'),
+      card('m-b', 'market', 'o-1'),
+    ]
+    expect(heroConnections(cards)).toEqual([
+      [0, 1],
+      [0, 2],
+    ])
+  })
+
+  it('returns nothing when no market oracle is displayed', () => {
+    expect(heroConnections([card('m-1', 'market', 'o-1')])).toEqual([])
   })
 })

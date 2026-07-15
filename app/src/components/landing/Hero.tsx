@@ -1,11 +1,17 @@
-import { useMemo, type CSSProperties } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { Button, Reveal } from '../ui'
 import { usePointerField } from '../../hooks/usePointerField'
 import { useOracles } from '../../hooks/useOracles'
 import { useMarkets } from '../../market/hooks/useMarkets'
 import { useOracleMeta } from '../../hooks/useOracleMeta'
-import { buildHeroCards, metaKeysFor, type HeroCard, type HeroTone } from '../../lib/heroFeed'
+import {
+  buildHeroCards,
+  heroConnections,
+  metaKeysFor,
+  type HeroCard,
+  type HeroTone,
+} from '../../lib/heroFeed'
 
 /** Desktop scatter slot: absolute placement + parallax drift depth (foreground = larger). */
 const POSITIONS: { pos: string; depth: number }[] = [
@@ -51,7 +57,8 @@ function ConstellationCard({ card, index }: { card: HeroCard; index: number }) {
   const slot = POSITIONS[index]
   return (
     // Outer: absolute scatter position + staggered scroll-reveal entrance.
-    <Reveal className={'w-full lg:absolute lg:w-[248px] ' + slot.pos} delay={index * 90}>
+    // data-slot lets the connector overlay measure this card's base box.
+    <Reveal className={'w-full lg:absolute lg:w-[248px] ' + slot.pos} delay={index * 90} data-slot={index}>
       {/* Inner: pointer parallax drift (kept off the reveal element so the two
           transforms don't clash). */}
       <div className="drift" style={{ '--drift-depth': `${slot.depth}px` } as CSSProperties}>
@@ -86,10 +93,11 @@ function ConstellationCard({ card, index }: { card: HeroCard; index: number }) {
  * Hero — the signature Auros constellation, now backed by LIVE protocol data:
  * the top oracles by stake and top markets by liquidity, interleaved as scattered
  * cards (see heroFeed). A bioluminescent orb tracks the cursor and each card
- * drifts toward it at its own depth. While data loads (or on a cluster with no
- * oracles/markets) example cards fill in, so the hero is never empty. Desktop:
- * cards are absolutely scattered around the headline; mobile: a stacked grid.
- * All motion is transform/opacity only and disabled under prefers-reduced-motion.
+ * drifts toward it at its own depth. When a displayed market uses a displayed
+ * oracle, a connector line links the two. While the first fetch is in flight,
+ * loading skeletons fill the slots (never fabricated cards). Desktop: cards are
+ * absolutely scattered around the headline; mobile: a stacked grid. All motion is
+ * transform/opacity only and disabled under prefers-reduced-motion.
  */
 export default function Hero() {
   const fieldRef = usePointerField<HTMLElement>()
@@ -111,6 +119,45 @@ export default function Hero() {
   // skeletons rather than fake content.
   const showSkeletons = cards.length === 0 && (oraclesLoading || marketsLoading)
 
+  // Connect an oracle card to a market card when the market uses that oracle and
+  // both are on screen. We measure the cards' BASE boxes (offsetLeft/Top ignore
+  // the reveal/drift CSS transforms) and draw an SVG connector between centers.
+  const containerRef = useRef<HTMLDivElement>(null)
+  const connections = useMemo(() => heroConnections(cards), [cards])
+  const [links, setLinks] = useState<{ x1: number; y1: number; x2: number; y2: number }[]>([])
+
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container || connections.length === 0) {
+      setLinks([])
+      return
+    }
+    const measure = () => {
+      const slot = new Map<number, HTMLElement>()
+      container.querySelectorAll<HTMLElement>('[data-slot]').forEach((el) => {
+        slot.set(Number(el.dataset.slot), el)
+      })
+      const center = (el: HTMLElement) => ({
+        x: el.offsetLeft + el.offsetWidth / 2,
+        y: el.offsetTop + el.offsetHeight / 2,
+      })
+      const next: { x1: number; y1: number; x2: number; y2: number }[] = []
+      for (const [o, m] of connections) {
+        const oEl = slot.get(o)
+        const mEl = slot.get(m)
+        if (!oEl || !mEl) continue
+        const a = center(oEl)
+        const b = center(mEl)
+        next.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y })
+      }
+      setLinks(next)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(container)
+    return () => ro.disconnect()
+  }, [connections])
+
   return (
     <section
       id="top"
@@ -123,7 +170,43 @@ export default function Hero() {
           above), so its soft falloff never shows a box edge mid-content. */}
       <div aria-hidden="true" className="cursor-orb pointer-events-none absolute inset-0 z-0" />
 
-      <div className="relative z-10 mx-auto max-w-[1200px] lg:min-h-[680px]">
+      <div ref={containerRef} className="relative z-10 mx-auto max-w-[1200px] lg:min-h-[680px]">
+        {/* Connector overlay — thin bioluminescent lines linking each oracle card to
+            the market that uses it (desktop scatter only; painted under the cards). */}
+        {links.length > 0 ? (
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 hidden h-full w-full lg:block"
+          >
+            {links.map((l, i) => (
+              <g key={i}>
+                <line
+                  x1={l.x1}
+                  y1={l.y1}
+                  x2={l.x2}
+                  y2={l.y2}
+                  stroke="rgba(43,214,199,0.28)"
+                  strokeWidth={1.5}
+                  strokeLinecap="round"
+                />
+                <line
+                  x1={l.x1}
+                  y1={l.y1}
+                  x2={l.x2}
+                  y2={l.y2}
+                  className="hero-link-flow"
+                  stroke="rgba(203,255,252,0.55)"
+                  strokeWidth={1}
+                  strokeLinecap="round"
+                  strokeDasharray="1.5 9"
+                />
+                <circle cx={l.x1} cy={l.y1} r={2.5} fill="rgba(203,255,252,0.7)" />
+                <circle cx={l.x2} cy={l.y2} r={2.5} fill="rgba(203,255,252,0.7)" />
+              </g>
+            ))}
+          </svg>
+        ) : null}
+
         {/* Headline layer — first in DOM (mobile order), centered overlay on desktop.
             Drifts gently OPPOSITE the cards (negative depth) for layered depth. */}
         <div className="relative z-10 mx-auto flex max-w-[680px] flex-col items-center text-center lg:absolute lg:inset-0 lg:justify-center">

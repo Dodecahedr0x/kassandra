@@ -22,6 +22,8 @@ export interface HeroCard {
   /** Stable React key + de-dupe id (the PDA for real cards). */
   id: string
   kind: 'oracle' | 'market'
+  /** The linked oracle PDA — the card's own pubkey for an oracle, `market.oracle` for a market. */
+  oracleId: string
   /** Route to the detail (real) or browse (example) view. */
   href: string
   /** The question — the oracle subject, or a fallback when meta is missing. */
@@ -72,6 +74,7 @@ function oracleCard(o: OracleSummary, meta: Map<string, OracleMetaView>): HeroCa
   return {
     id: o.pubkey,
     kind: 'oracle',
+    oracleId: o.pubkey,
     href: `/oracles/${o.pubkey}`,
     title: meta.get(o.pubkey)?.subject?.trim() || `Oracle ${truncateMiddle(o.pubkey)}`,
     status: pv.label,
@@ -88,6 +91,7 @@ function marketCard(m: MarketSummary, meta: Map<string, OracleMetaView>): HeroCa
   return {
     id: m.pubkey,
     kind: 'market',
+    oracleId: m.market.oracle.toString(),
     href: `/markets/${m.pubkey}`,
     title: meta.get(m.market.oracle.toString())?.subject?.trim() || `Market ${truncateMiddle(m.pubkey)}`,
     status: statusLabel(m.market.status),
@@ -122,4 +126,23 @@ export function buildHeroCards(
     rankOracles(oracles, k).map((o) => oracleCard(o, meta)),
     rankMarkets(markets, k).map((m) => marketCard(m, meta)),
   )
+}
+
+/**
+ * Slot-index pairs `[oracleIndex, marketIndex]` for each displayed market whose
+ * linked oracle is ALSO a displayed oracle — the constellation draws a connector
+ * between those two cards. Indices are positions in `cards` (= scatter slots).
+ */
+export function heroConnections(cards: readonly HeroCard[]): [number, number][] {
+  const oracleSlot = new Map<string, number>()
+  cards.forEach((c, i) => {
+    if (c.kind === 'oracle') oracleSlot.set(c.oracleId, i)
+  })
+  const pairs: [number, number][] = []
+  cards.forEach((c, i) => {
+    if (c.kind !== 'market') return
+    const oracleIndex = oracleSlot.get(c.oracleId)
+    if (oracleIndex !== undefined) pairs.push([oracleIndex, i])
+  })
+  return pairs
 }

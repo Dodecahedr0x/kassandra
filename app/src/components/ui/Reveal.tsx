@@ -14,6 +14,8 @@ export interface RevealProps {
   /** Element to render. Defaults to a plain `div`. */
   as?: ElementType
   className?: string
+  /** Pass-through `data-*` attributes (e.g. `data-slot`) forwarded to the element. */
+  [dataAttr: `data-${string}`]: string | number | undefined
 }
 
 /**
@@ -24,7 +26,7 @@ export interface RevealProps {
  * lands elements in their final state), and we also reveal immediately when the
  * observer is unavailable, so content is never stuck hidden.
  */
-export function Reveal({ children, delay = 0, as, className = '' }: RevealProps) {
+export function Reveal({ children, delay = 0, as, className = '', ...rest }: RevealProps) {
   const Tag: ElementType = as ?? 'div'
   const ref = useRef<HTMLElement>(null)
   const [revealed, setRevealed] = useState(false)
@@ -55,6 +57,7 @@ export function Reveal({ children, delay = 0, as, className = '' }: RevealProps)
       data-revealed={revealed ? 'true' : 'false'}
       style={delay ? ({ '--reveal-delay': `${delay}ms` } as CSSProperties) : undefined}
       className={`reveal ${className}`}
+      {...rest}
     >
       {children}
     </Tag>
