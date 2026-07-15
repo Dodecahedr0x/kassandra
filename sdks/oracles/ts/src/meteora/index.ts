@@ -13,6 +13,6 @@
  * `bdd8a1e355f484b3cff131578a662c560b97b72f` (see `./constants.ts`).
  */
 export * from "./constants.js";
-export * from "./instructions.js";
+export * from "./instructions/index.js";
 export * from "./accounts.js";
 export * as pda from "./pda.js";

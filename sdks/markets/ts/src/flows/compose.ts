@@ -20,7 +20,7 @@ import { Address, type TransactionInstruction } from "@solana/web3.js";
 
 import { EXTERNAL_PROGRAM_IDS } from "../constants.js";
 import type { Market } from "../accounts/market.js";
-import { activate as buildActivate } from "../instructions/market.js";
+import { activate as buildActivate } from "../instructions/market/index.js";
 import * as metadao from "../metadao/index.js";
 import * as pda from "../pda.js";
 import type { AddressInput } from "../pda.js";

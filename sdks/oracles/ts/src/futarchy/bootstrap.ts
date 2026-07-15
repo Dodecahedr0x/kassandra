@@ -17,9 +17,9 @@
  */
 import type { Address, TransactionInstruction } from "@solana/web3.js";
 
-import { setGovernance } from "../instructions/lifecycle.js";
+import { setGovernance } from "../instructions/lifecycle/index.js";
 import type { AddressInput } from "../pda.js";
-import { initializeDao } from "./instructions.js";
+import { initializeDao } from "./instructions/index.js";
 import * as fpda from "./pda.js";
 
 export interface BootstrapGovernanceArgs {

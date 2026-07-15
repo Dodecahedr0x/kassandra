@@ -9,8 +9,8 @@ import Layout from './components/layout/Layout.tsx'
 // (providers + NavBar) and the current route's chunk streams in on demand.
 const Landing = lazy(() => import('./pages/Landing.tsx'))
 const Oracles = lazy(() => import('./pages/Oracles.tsx'))
-const CreateOracle = lazy(() => import('./pages/CreateOracle.tsx'))
-const OracleDetail = lazy(() => import('./pages/OracleDetail.tsx'))
+const CreateOracle = lazy(() => import('./pages/CreateOracle/index.tsx'))
+const OracleDetail = lazy(() => import('./pages/OracleDetail/index.tsx'))
 const Markets = lazy(() => import('./pages/Markets.tsx'))
 const CreateMarket = lazy(() => import('./pages/CreateMarket.tsx'))
 const MarketDetail = lazy(() => import('./pages/MarketDetail.tsx'))

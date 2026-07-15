@@ -10,6 +10,6 @@
  * sibling `../meteora` module, not here.
  */
 export * from "./constants.js";
-export * from "./instructions.js";
+export * from "./instructions/index.js";
 export * from "./bootstrap.js";
 export * as pda from "./pda.js";

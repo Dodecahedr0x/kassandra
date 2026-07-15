@@ -27,11 +27,8 @@
  * e2e. A dedicated SQLite backend can be a follow-up if you want zero PG binaries.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
 
-import { Keypair } from '@solana/web3.js'
 import { TOKEN_PROGRAM_ID, associatedTokenAccount } from '@kassandra-market/oracles'
 
 import bs58 from 'bs58'
@@ -46,140 +43,26 @@ import {
   keepWindowOpen,
   openProposals,
   submitOneFact,
-  type SeedCtx,
 } from './seed.ts'
 import { seedMarkets, type ActiveMarketSeed } from './seed-market.ts'
-import { swapOnPool } from './seed-market-active.ts'
 import { startEphemeralPg, type EphemeralPg } from './indexer/pg.ts'
-
-const SURFPOOL_PORT = 8899
-const INDEXER_PORT = 3111
-const APP_PORT = 5173
-
-const APP_DIR = process.cwd() // `pnpm --filter app exec` runs here
-const ROOT = resolve(APP_DIR, '..')
-const LOGS = join(ROOT, 'logs')
-// The indexer is a WORKSPACE member, so `cargo build --manifest-path
-// indexer/Cargo.toml` writes the binary to the workspace-root target/, NOT
-// indexer/target/ (which doesn't exist — the pre-merge per-crate path).
-const INDEXER_BIN = join(ROOT, 'target', 'release', 'kassandra-indexer')
-const RUNNER_CONFIG = join(LOGS, 'runner.config.json')
-const WALLET_FILE = join(APP_DIR, 'e2e', '.wallet.json')
-
-/**
- * The dev wallet: by default the local Solana CLI keypair
- * (`~/.config/solana/id.json`, override path via `DEV_WALLET_KEYPAIR`), so you
- * transact from the wallet you already hold — no import step. Falls back to a
- * freshly generated (and printed) keypair when no local keypair file exists.
- * Returns the loaded keypair plus whether it came from disk.
- */
-async function loadDevWallet(): Promise<{ wallet: Keypair; fromFile: boolean }> {
-  const path = process.env.DEV_WALLET_KEYPAIR || join(homedir(), '.config', 'solana', 'id.json')
-  if (existsSync(path)) {
-    try {
-      const secret = Uint8Array.from(JSON.parse(readFileSync(path, 'utf8')) as number[])
-      return { wallet: await Keypair.fromSecretKey(secret), fromFile: true }
-    } catch (e) {
-      log(`[dev] ⚠ could not read ${path} (${(e as Error).message}); generating an ephemeral wallet`)
-    }
-  }
-  return { wallet: await Keypair.generate(), fromFile: false }
-}
-
-const rpcUrl = `http://127.0.0.1:${SURFPOOL_PORT}`
-// surfpool's websocket (accountSubscribe/programSubscribe) — bound explicitly to
-// RPC port + 1 so the indexer's price subscriber has a deterministic ws url.
-const wsUrl = `ws://127.0.0.1:${SURFPOOL_PORT + 1}`
-const indexerUrl = `http://127.0.0.1:${INDEXER_PORT}`
-const appUrl = `http://localhost:${APP_PORT}`
-
-/** Everything we must tear down on exit, in reverse order of creation. */
-const teardowns: Array<() => void | Promise<void>> = []
-const logFds: number[] = []
-let shuttingDown = false
-
-function log(msg: string): void {
-  // eslint-disable-next-line no-console
-  console.log(msg)
-}
-
-/** Open a truncating log file and return its numeric fd (spawn stdio needs an
- *  fd, not a freshly-created WriteStream whose fd is still null). */
-function openLog(name: string): number {
-  const fd = openSync(join(LOGS, `${name}.log`), 'w')
-  logFds.push(fd)
-  return fd
-}
-
-/** Idempotent teardown: kill children, stop Postgres + surfpool, close logs. */
-async function runTeardowns(reason: string): Promise<void> {
-  if (shuttingDown) return
-  shuttingDown = true
-  log(`\n[dev] ${reason} — tearing down…`)
-  for (const t of teardowns.reverse()) {
-    try {
-      await t()
-    } catch (e) {
-      log(`[dev] teardown error (ignored): ${String(e)}`)
-    }
-  }
-  for (const fd of logFds) {
-    try {
-      closeSync(fd)
-    } catch {
-      /* already closed */
-    }
-  }
-}
-
-/** Wait until the indexer's /status reports it has crawled `minEvents`. */
-async function waitForIndexer(minEvents: number, timeoutMs = 60_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  let last = ''
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${indexerUrl}/status`)
-      if (res.ok) {
-        const s = (await res.json()) as { eventCount: number }
-        last = JSON.stringify(s)
-        if (s.eventCount >= minEvents) return
-      }
-    } catch {
-      /* still starting */
-    }
-    await new Promise((r) => setTimeout(r, 500))
-  }
-  log(`[dev] ⚠ indexer did not reach ${minEvents} events in ${timeoutMs}ms (last: ${last}) — continuing`)
-}
-
-/**
- * Give the active market a non-trivial price history: wait until the indexer's
- * price subscriber is live (its baseline candle exists), then drive a few swaps
- * that move the pool up and down. Each swap's pool update is recorded as a candle
- * point, so the market's chart shows genuine movement in `make dev`.
- */
-async function seedActivePriceHistory(ctx: SeedCtx, seed: ActiveMarketSeed): Promise<void> {
-  const candlesUrl = `${indexerUrl}/api/markets/${seed.market}/candles?interval=60&limit=5`
-  const deadline = Date.now() + 30_000
-  // 1) Wait until the subscriber has captured its baseline point (⇒ it's subscribed).
-  for (;;) {
-    try {
-      const res = await fetch(candlesUrl)
-      if (res.ok && ((await res.json()) as unknown[]).length >= 1) break
-    } catch {
-      /* indexer/subscriber still coming up */
-    }
-    if (Date.now() > deadline) throw new Error('price subscriber did not produce a baseline candle')
-    await new Promise((r) => setTimeout(r, 500))
-  }
-  // 2) Move the price both ways so the candle has a real range (down → up → down).
-  log('[dev]   · driving swaps on the active pool (down → up → down) to populate the price chart')
-  await swapOnPool(ctx, seed, 'down', 2_000_000_000n)
-  await new Promise((r) => setTimeout(r, 1_200))
-  await swapOnPool(ctx, seed, 'up', 3_000_000_000n)
-  await new Promise((r) => setTimeout(r, 1_200))
-  await swapOnPool(ctx, seed, 'down', 1_000_000_000n)
-}
+import {
+  APP_PORT,
+  INDEXER_BIN,
+  INDEXER_PORT,
+  LOGS,
+  ROOT,
+  RUNNER_CONFIG,
+  SURFPOOL_PORT,
+  WALLET_FILE,
+  appUrl,
+  indexerUrl,
+  rpcUrl,
+  wsUrl,
+} from './dev/env.ts'
+import { log, openLog, runTeardowns, teardowns } from './dev/teardown.ts'
+import { loadDevWallet } from './dev/wallet.ts'
+import { seedActivePriceHistory, waitForIndexer } from './dev/indexer.ts'
 
 async function main(): Promise<void> {
   mkdirSync(LOGS, { recursive: true })

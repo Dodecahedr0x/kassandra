@@ -5,7 +5,7 @@
  * little-endian payload-writer helpers.
  */
 export * from "./payload.js";
-export * from "./lifecycle.js";
+export * from "./lifecycle/index.js";
 export * from "./dispute.js";
 export * from "./challenge.js";
 export * from "./settlement.js";

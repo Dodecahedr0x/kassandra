@@ -11,20 +11,20 @@
 //!   accounts. Serves `/api/*` alongside the oracle routes on the same server.
 
 mod api;
+mod config;
 mod db;
 mod decoder;
 mod market;
 mod meta_fetch;
 mod oracle_accounts;
 mod processor;
+mod reconcile;
 mod state;
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::{str::FromStr, time::Duration};
 
 use anyhow::{Context, Result};
-use carbon_core::account::AccountDecoder;
 use carbon_core::pipeline::Pipeline;
 use carbon_rpc_gpa_datasource::GpaDatasource;
 use carbon_rpc_program_subscribe_datasource::{Filters as SubscribeFilters, RpcProgramSubscribe};
@@ -36,9 +36,11 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 
 use crate::api::ApiState;
+use crate::config::{env_num, ws_url_for_prices};
 use crate::decoder::{program_id, program_id_str, KassandraDecoder};
 use crate::market::rpc::Rpc as MarketRpc;
 use crate::processor::KassandraProcessor;
+use crate::reconcile::market_reconcile_loop;
 
 /// Subscribe-mode snapshot cadence (ms): the ws tail handles freshness, so this
 /// slower getProgramAccounts pass only needs to prune accounts closed on-chain.
@@ -300,107 +302,4 @@ async fn main() -> Result<()> {
         _ = tokio::signal::ctrl_c() => { log::info!("[indexer] SIGINT — shutting down"); }
     }
     Ok(())
-}
-
-fn env_num<T: FromStr>(key: &str, default: T) -> T {
-    std::env::var(key)
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(default)
-}
-
-/// The websocket url for the price subscriber: `SOLANA_WS_URL` if set, else derive
-/// it from the HTTP RPC url — `http`→`ws` / `https`→`wss`, and when the url carries
-/// an explicit port, use port+1 (the Solana pubsub convention that local validators
-/// and surfpool follow: RPC 8899 → WS 8900). Returns `None` for a URL we can't map
-/// (no explicit port on an https provider that needs an out-of-band ws host — set
-/// `SOLANA_WS_URL` there).
-fn ws_url_for_prices(rpc_url: &str) -> Option<String> {
-    if let Ok(explicit) = std::env::var("SOLANA_WS_URL") {
-        if !explicit.is_empty() {
-            return Some(explicit);
-        }
-    }
-    let (scheme, rest, ws_scheme) = if let Some(r) = rpc_url.strip_prefix("http://") {
-        ("http://", r, "ws://")
-    } else if let Some(r) = rpc_url.strip_prefix("https://") {
-        ("https://", r, "wss://")
-    } else {
-        return None;
-    };
-    let _ = scheme;
-    // Split host[:port][/path]; we only remap an explicit host:port authority.
-    let (authority, path) = match rest.find('/') {
-        Some(i) => (&rest[..i], &rest[i..]),
-        None => (rest, ""),
-    };
-    let (host, port) = authority.rsplit_once(':')?;
-    let next = port.parse::<u16>().ok()?.checked_add(1)?;
-    Some(format!("{ws_scheme}{host}:{next}{path}"))
-}
-
-/// Periodically re-snapshot the market program's accounts (getProgramAccounts),
-/// upsert them into `market_accounts`, and prune those closed on-chain. Runs in
-/// BOTH modes: the freshness path in reconcile mode (no ws), and a slower
-/// close-pruning pass in subscribe mode (the ws tail never observes a close).
-async fn market_reconcile_loop(
-    rpc: Arc<MarketRpc>,
-    client: Arc<tokio_postgres::Client>,
-    program_id: Pubkey,
-    interval_ms: u64,
-) {
-    let decoder = market::decoder::KassandraAccountDecoder { program_id };
-    loop {
-        tokio::time::sleep(Duration::from_millis(interval_ms)).await;
-        match market_reconcile_once(&rpc, &client, &decoder).await {
-            Ok(n) => log::debug!("[market] reconcile: {n} accounts"),
-            Err(e) => log::warn!("[market] reconcile failed: {e}"),
-        }
-    }
-}
-
-async fn market_reconcile_once(
-    rpc: &MarketRpc,
-    client: &tokio_postgres::Client,
-    decoder: &market::decoder::KassandraAccountDecoder,
-) -> Result<usize> {
-    let slot = rpc.get_slot().await? as i64;
-    let accounts = rpc.get_program_accounts(&decoder.program_id).await?;
-    let mut present: HashSet<String> = HashSet::new();
-    let mut n = 0;
-    for (pubkey, account) in accounts {
-        if let Some(decoded) = decoder.decode_account(&account) {
-            let key = pubkey.to_string();
-            market::processor::persist(client, &key, &decoded.data, account.data.as_slice(), slot)
-                .await;
-            present.insert(key);
-            n += 1;
-        }
-    }
-    // The ONLY path that removes closed accounts (the subscribe tail can't observe
-    // a close). Slot-aware, so a just-created account ahead of this snapshot isn't
-    // wrongly dropped.
-    market::db::prune(client, slot, &present).await?;
-    Ok(n)
-}
-
-#[cfg(test)]
-mod ws_url_tests {
-    use super::ws_url_for_prices;
-
-    #[test]
-    fn derives_ws_from_http_with_port() {
-        // No SOLANA_WS_URL in the test env → derivation path (http→ws, port+1).
-        assert_eq!(
-            ws_url_for_prices("http://127.0.0.1:8960").as_deref(),
-            Some("ws://127.0.0.1:8961")
-        );
-        assert_eq!(
-            ws_url_for_prices("https://rpc.example.com:443/path").as_deref(),
-            Some("wss://rpc.example.com:444/path")
-        );
-        // No explicit port → not derivable (caller must set SOLANA_WS_URL).
-        assert_eq!(ws_url_for_prices("https://rpc.example.com"), None);
-        assert_eq!(ws_url_for_prices("garbage"), None);
-    }
 }

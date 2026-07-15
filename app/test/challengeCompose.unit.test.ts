@@ -14,9 +14,8 @@
  *   - the twap_initial_observation + seed-liquidity math (mirror buildPool);
  *   - validation (bad nonce / bad address / non-positive reserves / bad question id).
  */
-import { Address, Keypair, TransactionInstruction, type Connection } from "@solana/web3.js";
+import { Address } from "@solana/web3.js";
 import {
-  EXTERNAL_PROGRAM_IDS,
   ammV04,
   associatedTokenAccount,
   futarchy,
@@ -31,57 +30,10 @@ import {
   DEFAULT_QUOTE_RESERVE,
   MAX_OBSERVATION_CHANGE,
   PRICE_SCALE,
-  buildComposeAndOpenChallengeIxs,
   twapInitialObservation,
 } from "../src/data/actions/challengeCompose.ts";
 import { buildOpenChallengeIxs } from "../src/data/actions/challenge.ts";
-
-const enc = new TextEncoder();
-const VLTX = EXTERNAL_PROGRAM_IDS.conditionalVault;
-
-/** A connection whose ATA-existence check always reports absent (create fires). */
-function fakeConnection(): Connection {
-  return { getAccountInfo: async () => null } as unknown as Connection;
-}
-
-function keyShape(ix: TransactionInstruction) {
-  return ix.keys.map((k) => ({
-    pubkey: k.pubkey.toString(),
-    isSigner: k.isSigner,
-    isWritable: k.isWritable,
-  }));
-}
-
-function expectIxMatches(actual: TransactionInstruction, expected: TransactionInstruction) {
-  expect(actual.programId.toString()).toBe(expected.programId.toString());
-  expect(Array.from(actual.data)).toEqual(Array.from(expected.data));
-  expect(keyShape(actual)).toEqual(keyShape(expected));
-}
-
-/** A deterministic fixture: the nonce, proposer, challenger, mints, dao. */
-async function fixture() {
-  const nonce = 100n;
-  const proposer = (await Keypair.generate()).publicKey;
-  const challenger = (await Keypair.generate()).publicKey;
-  const kassMint = (await Keypair.generate()).publicKey;
-  const usdcMint = (await Keypair.generate()).publicKey;
-  const kassDao = (await Keypair.generate()).publicKey;
-  return { nonce, proposer, challenger, kassMint, usdcMint, kassDao };
-}
-
-async function build(over: Partial<Parameters<typeof buildComposeAndOpenChallengeIxs>[0]> = {}) {
-  const f = await fixture();
-  return buildComposeAndOpenChallengeIxs({
-    connection: fakeConnection(),
-    oracleNonce: f.nonce,
-    proposer: f.proposer,
-    challenger: f.challenger,
-    kassMint: f.kassMint,
-    usdcMint: f.usdcMint,
-    kassDao: f.kassDao,
-    ...over,
-  });
-}
+import { VLTX, build, enc, expectIxMatches, fixture } from "./helpers/challengeCompose.ts";
 
 describe("compose — the step sequence + grouping", () => {
   it("returns the 7 ordered steps in the exact choreography order", async () => {

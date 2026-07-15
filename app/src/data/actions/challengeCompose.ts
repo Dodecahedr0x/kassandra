@@ -42,159 +42,36 @@
  * NO core / SDK change: every ix comes from the SDK `futarchy` / `ammV04`
  * builders + RF4's `buildOpenChallengeIxs`; only PDAs/ATAs are derived here.
  */
-import { Address, TransactionInstruction, type Connection } from "@solana/web3.js";
+import type { TransactionInstruction } from "@solana/web3.js";
 import {
-  ATA_PROGRAM_ID,
-  SYSTEM_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
   associatedTokenAccount,
   ammV04,
   futarchy,
   pda,
 } from "@kassandra-market/oracles";
 
-import { ValidationError, type AddressInput } from "../actions";
+import { ValidationError } from "../actions";
 import { conditionalTokenMint } from "./challengeTrade";
 import { buildOpenChallengeIxs } from "./challenge";
+import {
+  DEFAULT_BASE_RESERVE,
+  DEFAULT_QUESTION_ID,
+  DEFAULT_QUOTE_RESERVE,
+  MAX_OBSERVATION_CHANGE,
+  twapInitialObservation,
+} from "./challengeCompose/constants";
+import { addr, createAtaIdempotentIx, toBig } from "./challengeCompose/helpers";
+import type { BuildComposeArgs, ComposeStep, ComposedMarket } from "./challengeCompose/types";
 
-// ── seed / TWAP math (mirror challenge-market-e2e buildPool) ─────────────────
-
-/** PRICE_SCALE — the v0.4 AMM's fixed-point scale for the TWAP observation. */
-export const PRICE_SCALE = 1_000_000_000_000n;
-/** `twap_max_observation_change_per_update` — `(2^64−1) · 1e12` (no clamp; a
- * single crank folds the current price into the TWAP verbatim, exactly as the
- * E2E's `MAX_PRICE`). */
-export const MAX_OBSERVATION_CHANGE = ((1n << 64n) - 1n) * PRICE_SCALE;
-/** Default base reserve: 100 conditional-KASS (9 dp) — the E2E's `BASE_RESERVE`. */
-export const DEFAULT_BASE_RESERVE = 100_000_000_000n;
-/** Default quote reserve: 100 conditional-USDC (6 dp) → seeded price 1e12-scaled 1.0 (the E2E's `QUOTE_NEUTRAL`). */
-export const DEFAULT_QUOTE_RESERVE = 100_000_000n;
-
-/**
- * The v0.4 `twap_initial_observation` for a pool seeded with `baseReserve` base
- * and `quoteReserve` quote — `quoteReserve · PRICE_SCALE / baseReserve` (the
- * scaled spot price the pool opens at). Mirrors `buildPool`'s `initialObs`.
- */
-export function twapInitialObservation(baseReserve: bigint, quoteReserve: bigint): bigint {
-  if (baseReserve <= 0n) throw new ValidationError("baseReserve", "baseReserve must be greater than zero.");
-  return (quoteReserve * PRICE_SCALE) / baseReserve;
-}
-
-/** Coerce an {@link AddressInput}, re-typing a parse failure as a field error. */
-function addr(field: string, a: AddressInput): Address {
-  if (a instanceof Address) return a;
-  try {
-    return new Address(a);
-  } catch {
-    throw new ValidationError(field, `${field} is not a valid base58 address.`);
-  }
-}
-
-function requirePositive(field: string, v: bigint): bigint {
-  if (v <= 0n) throw new ValidationError(field, `${field} must be greater than zero.`);
-  return v;
-}
-
-function toBig(field: string, v: bigint | number): bigint {
-  const b = typeof v === "bigint" ? v : BigInt(Math.trunc(v));
-  return requirePositive(field, b);
-}
-
-/**
- * The idempotent `createAssociatedTokenAccountIdempotent` ix (ATA program
- * discriminant `1`) — the same hand-built layout the WF1 write layer uses (no
- * `@solana/spl-token` dep). Accounts: payer(w,signer), ata(w), owner(ro),
- * mint(ro), system program(ro), token program(ro).
- */
-function createAtaIdempotentIx(
-  payer: Address,
-  ataAddr: Address,
-  owner: Address,
-  mint: Address,
-): TransactionInstruction {
-  return new TransactionInstruction({
-    programId: ATA_PROGRAM_ID,
-    keys: [
-      { pubkey: payer, isSigner: true, isWritable: true },
-      { pubkey: ataAddr, isSigner: false, isWritable: true },
-      { pubkey: owner, isSigner: false, isWritable: false },
-      { pubkey: mint, isSigner: false, isWritable: false },
-      { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
-      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-    ],
-    data: Uint8Array.of(1),
-  });
-}
-
-/** A labelled, single-tx group of instructions in the compose→open sequence. */
-export interface ComposeStep {
-  /** A stable id for resume/skip logic. */
-  id: string;
-  /** A human label for the progress UI (e.g. "Create question"). */
-  label: string;
-  /** The instructions to send in ONE transaction for this step. */
-  ixs: TransactionInstruction[];
-  /**
-   * Optional compute-unit budget hint for this step (some steps CPI heavily —
-   * split_tokens / open_challenge). The UI prepends a setComputeUnitLimit ix.
-   */
-  computeUnits?: number;
-}
-
-/**
- * The fully-derived account set the compose produces — the question, the two
- * conditional vaults + their pass/fail mints, the two AMM pool PDAs, and the
- * oracle-owned pass/fail KASS holder ATAs. Returned alongside the steps so a
- * caller (the E2E) can assert against the on-chain accounts.
- */
-export interface ComposedMarket {
-  oracle: Address;
-  question: Address;
-  kassVault: Address;
-  usdcVault: Address;
-  kassVaultUnderlying: Address;
-  usdcVaultUnderlying: Address;
-  passKassMint: Address;
-  failKassMint: Address;
-  passUsdcMint: Address;
-  failUsdcMint: Address;
-  passAmm: Address;
-  failAmm: Address;
-  oraclePassKass: Address;
-  oracleFailKass: Address;
-  /** The challenger's USDC source account funding the escrow (its USDC ATA). */
-  challengerUsdcSrc: Address;
-}
-
-export interface BuildComposeArgs {
-  connection: Connection;
-  /** Oracle nonce (re-derives the oracle PDA that resolves the question / signs). */
-  oracleNonce: bigint | number;
-  /** The challenged claim's Proposer PDA (open_challenge derives ai_claim/market). */
-  proposer: AddressInput;
-  /** Challenger (signer): composes + funds everything, opens the Market. */
-  challenger: AddressInput;
-  /** The oracle's KASS mint (`oracle.kassMint`). */
-  kassMint: AddressInput;
-  /** The oracle's USDC mint (`oracle.usdcMint`). */
-  usdcMint: AddressInput;
-  /** The futarchy `Dao` (`== protocol.kass_dao`) — kass_price source for the escrow. */
-  kassDao: AddressInput;
-  /**
-   * 32-byte question id (seeds the Question PDA). Defaults to a deterministic
-   * fill so the same challenger→oracle produces the same market. A caller may
-   * pass a distinct id.
-   */
-  questionId?: Uint8Array;
-  /** Base (conditional-KASS) reserve to seed each pool with. Default 100 KASS (9 dp). */
-  baseReserve?: bigint | number;
-  /** Quote (conditional-USDC) reserve to seed each pool with. Default 100 USDC (6 dp). */
-  quoteReserve?: bigint | number;
-  programId?: Address;
-}
-
-/** The default deterministic question id (mirrors the E2E's `fill(0x07)`). */
-export const DEFAULT_QUESTION_ID = new Uint8Array(32).fill(0x07);
+export {
+  PRICE_SCALE,
+  MAX_OBSERVATION_CHANGE,
+  DEFAULT_BASE_RESERVE,
+  DEFAULT_QUOTE_RESERVE,
+  DEFAULT_QUESTION_ID,
+  twapInitialObservation,
+} from "./challengeCompose/constants";
+export type { BuildComposeArgs, ComposeStep, ComposedMarket } from "./challengeCompose/types";
 
 /**
  * Compose the FULL MetaDAO v0.4 challenge market client-side + open the challenge,
