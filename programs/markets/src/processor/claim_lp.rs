@@ -38,7 +38,7 @@ use crate::{
         assert_key, close_data_account, load_contribution, load_market, market_signer_seeds,
         read_token_mint, read_token_owner, write_market,
     },
-    state::MarketStatus,
+    state::{Contribution, Market, MarketStatus},
 };
 
 /// Floor pro-rata share via a u128 intermediate (mirrors the sibling
@@ -52,6 +52,37 @@ fn pro_rata_share(lp_total: u64, amount: u64, total_contributed: u64) -> Result<
         .checked_mul(amount as u128)
         .ok_or(ProgramError::ArithmeticOverflow)?;
     u64::try_from(scaled / total_contributed as u128).map_err(|_| ProgramError::ArithmeticOverflow)
+}
+
+/// This contribution's share of the post-fee `lp_vault` on the GROSS-LP basis,
+/// used once a market has had post-activation `add_liquidity` (mixed cohort):
+///   `gross_i = activation_lp · amount / activation_contributed + late_lp`
+///   `share   = lp_total · gross_i / gross_lp_total`
+/// A pure funder's gross is their activation pro-rata; a late depositor's is their
+/// recorded `late_lp`; a contributor who did both gets the sum. Every product is
+/// `u64 × u64` (fits u128); floor at each step, with the last-claimer sweep
+/// absorbing the dust. Reduces to `pro_rata_share` for an activation-only market,
+/// which takes the exact legacy path instead (see `process`).
+fn gross_lp_share(m: &Market, c: &Contribution) -> Result<u64, ProgramError> {
+    let activation = if m.activation_contributed == 0 {
+        0u128
+    } else {
+        (m.activation_lp as u128)
+            .checked_mul(c.amount as u128)
+            .ok_or(ProgramError::ArithmeticOverflow)?
+            / m.activation_contributed as u128
+    };
+    let gross = activation
+        .checked_add(c.late_lp as u128)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+    if m.gross_lp_total == 0 {
+        return Err(MarketError::InvalidAccount.into());
+    }
+    let share = (m.lp_total as u128)
+        .checked_mul(gross)
+        .ok_or(ProgramError::ArithmeticOverflow)?
+        / m.gross_lp_total as u128;
+    u64::try_from(share).map_err(|_| ProgramError::ArithmeticOverflow.into())
 }
 
 pub fn process(
@@ -127,12 +158,18 @@ pub fn process(
     let share = if market.open_contributions == 1 {
         let d = lp_vault_ai.try_borrow()?;
         metadao::read_u64(&d, SPL_TOKEN_AMOUNT_OFFSET)?
-    } else {
+    } else if market.gross_lp_total == market.activation_lp {
+        // No post-activation liquidity was ever added (gross_lp_total untouched since
+        // activate): the whole cohort minted LP at one rate, so the exact legacy
+        // KASS pro-rata is correct and byte-identical to pre-add_liquidity behavior.
         pro_rata_share(
             market.lp_total,
             contribution.amount,
             market.total_contributed,
         )?
+    } else {
+        // Mixed cohort (funders + late LPs): distribute by GROSS LP.
+        gross_lp_share(&market, &contribution)?
     };
 
     // Program-signed transfer out of lp_vault (authority = the market PDA).
