@@ -3,11 +3,13 @@
 //! `programs/markets/src/processor/`).
 
 mod activate;
+mod add_liquidity;
 mod config;
 mod funding;
 mod settle;
 
 pub use activate::*;
+pub use add_liquidity::*;
 pub use config::*;
 pub use funding::*;
 pub use settle::*;

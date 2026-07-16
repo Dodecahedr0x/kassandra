@@ -54,9 +54,12 @@ MetaDAO accepts a non-authority `user_lp`:
    `collect_fee`'s assumption that those holders are empty until it runs.
 
 Client passes `quote_amount = min(amount, floor(amount · reserveQuote /
-reserveBase))` and `max_base_amount = amount` so the CPI never needs more of
-either side than was split; any shortfall just enlarges the returned remainder
-(never a revert, never a loss).
+reserveBase))` (with a small headroom — the AMM rounds the derived base up) and
+`max_base_amount = amount` so the CPI never needs more of either side than was
+split; any shortfall just enlarges the returned remainder (never a revert, never
+a loss). MetaDAO **requires a non-zero `min_lp_tokens`** for a non-empty pool, so
+it is a 4th payload field (client-computed slippage floor); the 32-byte payload is
+`amount ++ quote_amount ++ max_base_amount ++ min_lp_tokens` (4 × u64 LE).
 
 **Trade-off (documented):** for a skewed pool the depositor gets back one-sided
 conditional tokens they can only realize by trading/redeeming. This is the price

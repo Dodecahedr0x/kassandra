@@ -18,3 +18,4 @@ pub const IX_CLAIM_LP: u8 = 7;
 pub const IX_RESOLVE_MARKET: u8 = 8;
 pub const IX_COLLECT_FEE: u8 = 9;
 pub const IX_CLOSE_MARKET: u8 = 10;
+pub const IX_ADD_LIQUIDITY: u8 = 11;

@@ -73,6 +73,39 @@ impl TestCtx {
         addr
     }
 
+    /// Fabricate an initialized SPL token account at a SPECIFIC address (e.g. a
+    /// canonical ATA the program re-derives), on `mint` owned by `owner` holding
+    /// `amount`. Sibling of [`create_token_account`], which picks a random address.
+    pub fn create_token_account_at(&mut self, addr: Pubkey, mint: Pubkey, owner: Pubkey, amount: u64) {
+        let state = TokenAccount {
+            mint,
+            owner,
+            amount,
+            delegate: COption::None,
+            state: AccountState::Initialized,
+            is_native: COption::None,
+            delegated_amount: 0,
+            close_authority: COption::None,
+        };
+        let mut data = vec![0u8; TokenAccount::LEN];
+        state.pack_into_slice(&mut data);
+        let lamports = self
+            .svm
+            .minimum_balance_for_rent_exemption(TokenAccount::LEN);
+        self.svm
+            .set_account(
+                addr,
+                Account {
+                    lamports,
+                    data,
+                    owner: TOKEN_PROGRAM_ID,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .unwrap();
+    }
+
     /// Overwrite an existing SPL token account's `amount` in place (preserving
     /// mint/owner/state) — used to simulate a dust donation into a program-owned
     /// token account (e.g. an escrow PDA a griefer transfers into).

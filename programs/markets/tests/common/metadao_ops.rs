@@ -196,6 +196,63 @@ impl TestCtx {
         self.send_many(&[ix], &[])
     }
 
+    /// Send an `AddLiquidity` (Ix 11): `depositor` deposits `amount` KASS into the
+    /// live pool for `market`. Fabricates the depositor's canonical KASS/cYES/cNO
+    /// ATAs (KASS pre-funded with `amount`), reads the live pool reserves to compute
+    /// the balanced `quote_amount`/`max_base_amount`, and submits (depositor signs;
+    /// a CU budget is prepended for the two CPIs). Returns `(depositor_cyes_ata,
+    /// depositor_cno_ata, result)` so the test can assert the returned remainder.
+    #[allow(clippy::result_large_err)]
+    pub fn add_liquidity(
+        &mut self,
+        depositor: &Keypair,
+        oracle: Pubkey,
+        kass_mint: Pubkey,
+        refs: &MetaDaoRefs,
+        amount: u64,
+    ) -> (Pubkey, Pubkey, TransactionResult) {
+        use kassandra_markets_sdk::metadao as md;
+        let dep = depositor.pubkey();
+        let dep_kass = md::ata(&dep, &kass_mint);
+        let dep_cyes = md::ata(&dep, &refs.yes_mint);
+        let dep_cno = md::ata(&dep, &refs.no_mint);
+        self.create_token_account_at(dep_kass, kass_mint, dep, amount);
+        self.create_token_account_at(dep_cyes, refs.yes_mint, dep, 0);
+        self.create_token_account_at(dep_cno, refs.no_mint, dep, 0);
+
+        // Balanced hints from the live reserves (base = cYES, quote = cNO): deposit
+        // `quote_amount` cNO fully; base (cYES) is ratio-derived by the AMM and must
+        // stay within `amount` (all the base we split). The AMM rounds the derived
+        // base UP, so we leave a 2-unit headroom; the tiny shortfall is returned as
+        // dust. (The real app/flow layer computes this precisely.)
+        let base_reserve = self.token_balance(refs.amm_vault_base) as u128;
+        let quote_reserve = self.token_balance(refs.amm_vault_quote) as u128;
+        let quote_amount = if base_reserve == 0 {
+            amount
+        } else {
+            ((amount as u128 * quote_reserve / base_reserve).min(amount as u128) as u64)
+                .saturating_sub(2)
+        };
+        let max_base_amount = amount;
+        // MetaDAO requires a non-zero min_lp for a live pool; `1` accepts any
+        // positive mint (the test measures the actual LP). Real slippage bounds are
+        // computed in the app/flow layer.
+        let min_lp_tokens = 1;
+
+        let ix = kassandra_markets_sdk::ix::add_liquidity(
+            &dep,
+            &oracle,
+            &kass_mint,
+            0,
+            amount,
+            quote_amount,
+            max_base_amount,
+            min_lp_tokens,
+        );
+        let res = self.send_many(&[ix], &[depositor]);
+        (dep_cyes, dep_cno, res)
+    }
+
     /// Client `amm::swap`: `user` swaps `input` of one conditional leg for the
     /// other (fee accrues to the pool, growing the LP position's value). `user`
     /// owns `user_cyes`/`user_cno`. Returns the LiteSVM result.

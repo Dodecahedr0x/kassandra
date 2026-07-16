@@ -3,6 +3,7 @@ use pinocchio::{account::AccountView, address::Address, error::ProgramError, Pro
 use crate::instruction::Ix;
 
 pub mod activate;
+pub mod add_liquidity;
 pub mod cancel;
 pub mod claim_lp;
 pub mod close_market;
@@ -32,5 +33,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
         Ix::ResolveMarket => resolve_market::process(program_id, accounts, payload),
         Ix::CollectFee => collect_fee::process(program_id, accounts, payload),
         Ix::CloseMarket => close_market::process(program_id, accounts, payload),
+        Ix::AddLiquidity => add_liquidity::process(program_id, accounts, payload),
     }
 }
