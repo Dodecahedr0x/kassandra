@@ -1,7 +1,15 @@
 # Add liquidity to active markets — design
 
 **Date:** 2026-07-16
-**Status:** proposed (awaiting validation)
+**Status:** implemented (branch `feat/add-liquidity-active-markets`)
+
+**Delivered:** on-chain `add_liquidity` (Ix 11) + gross-LP `claim_lp`/state changes
+(program tests incl. an exact fairness proof + fee-path consistency), Rust & TS
+SDK builders/flow, indexer DTO fields, and an `AddLiquidityControl` in the Active
+markets' Liquidity tab. Deferred: bulk add across an oracle's Active sibling group
+(per-sibling reserves + mixed funding/active cohort UX) — the per-market control
+already delivers the goal.
+
 **Goal:** let anyone deposit KASS into a market that is already `Active` (its
 cYES/cNO AMM is live), receiving pooled LP that is claimable pro-rata alongside
 the original funders.
