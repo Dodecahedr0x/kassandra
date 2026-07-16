@@ -38,7 +38,12 @@ import { GroupLiquidityPanel } from "../src/components/markets/actions/GroupLiqu
 
 const ORACLE = "Orac1e1111111111111111111111111111111111111";
 
-function summary(outcomeIndex: number, status: MarketStatus, feeCollected = false) {
+function summary(
+  outcomeIndex: number,
+  status: MarketStatus,
+  feeCollected = false,
+  reserves: { base: bigint; quote: bigint } | null = null,
+) {
   return {
     pubkey: `Market${outcomeIndex}1111111111111111111111111111111111`,
     market: {
@@ -48,7 +53,7 @@ function summary(outcomeIndex: number, status: MarketStatus, feeCollected = fals
       feeCollected,
       lpMint: { toString: () => `LpMint${outcomeIndex}111111111111111111111111111111111` },
     },
-    reserves: null,
+    reserves,
     oracleOptionsCount: 3,
   } as unknown;
 }
@@ -67,9 +72,31 @@ describe("GroupLiquidityPanel", () => {
     const html = render();
     expect(html).toContain("Group liquidity");
     expect(html).toContain("all 3 outcomes");
-    // Deposit affordance targets the 3 funding outcomes with a uniform split.
+    // Deposit affordance targets the 3 depositable outcomes with a uniform split.
     expect(html).toContain("Deposit into 3 outcomes");
-    expect(html).toMatch(/Split uniformly across 3 funding outcomes/);
+    expect(html).toMatch(/Split uniformly across 3 outcomes/);
+  });
+
+  it("offers bulk add-liquidity for an ACTIVE group (with reserves), skipping reserveless outcomes", () => {
+    const r = { base: 1_000_000n, quote: 1_000_000n };
+    state.siblings = [
+      summary(0, MarketStatus.Active, false, r),
+      summary(1, MarketStatus.Active, false, r),
+      summary(2, MarketStatus.Active, false, null), // reserves not loaded → excluded
+    ];
+    const html = render();
+    // Only the 2 outcomes with known reserves are depositable.
+    expect(html).toContain("Deposit into 2 outcomes");
+    expect(html).toMatch(/Split uniformly across 2 outcomes/);
+  });
+
+  it("closes deposits when no outcome can take liquidity", () => {
+    state.siblings = [
+      summary(0, MarketStatus.Active, false, null), // Active but reserveless
+      summary(1, MarketStatus.Resolved),
+    ];
+    const html = render();
+    expect(html).toContain("deposits are closed for this group");
   });
 
   it("self-hides for a lone market (not a group)", () => {

@@ -11,9 +11,12 @@
  */
 import { buildContributeIxs } from "./contribute";
 import { buildClaimLpIxs } from "./claimLp";
+import { buildAddLiquidityIxs } from "./addLiquidity";
 import type { ActivateStep } from "./activate";
 import { toAddress, type AddressInput } from "./ata";
 import type { IndexerClient } from "../../lib/indexer";
+import type { Market } from "@kassandra-market/markets";
+import type { AmmReserves } from "../markets";
 import { ValidationError } from "../writeAction";
 
 /**
@@ -74,6 +77,60 @@ export async function buildBulkContributeSteps(
         contributor: args.contributor,
         amount: e.amount,
       }),
+      checkAccount: toAddress("Market", e.market),
+      skipIfLanded: false,
+    })),
+  );
+}
+
+/**
+ * One Active sub-market's add-liquidity deposit: its PDA, a display label, the
+ * KASS to add, its decoded account (MetaDAO bindings + `lpTotal`), and its live
+ * cYES/cNO pool reserves (to size the balanced deposit).
+ */
+export interface BulkAddLiquidityEntry {
+  market: AddressInput;
+  label: string;
+  amount: bigint;
+  marketAccount: Market;
+  reserves: AmmReserves;
+}
+
+export interface BuildBulkAddLiquidityArgs {
+  /** Depositor authority (the signer). */
+  contributor: AddressInput;
+  /** Per-Active-sub-market deposits; entries with `amount <= 0` are dropped. */
+  entries: BulkAddLiquidityEntry[];
+  /** Slippage tolerance on minted LP, in bps (default 100 = 1%). */
+  slippageBps?: number;
+}
+
+/**
+ * One add-liquidity step per funded Active sub-market (dropping zero-amount
+ * entries), each flagged `skipIfLanded: false` so a repeat deposit is never
+ * skipped. Each step's ix list already carries its own compute budget + idempotent
+ * ATA creates (from {@link buildAddLiquidityIxs}).
+ */
+export async function buildBulkAddLiquiditySteps(
+  args: BuildBulkAddLiquidityArgs,
+): Promise<ActivateStep[]> {
+  const funded = args.entries.filter((e) => e.amount > 0n);
+  if (funded.length === 0) {
+    throw new ValidationError("Enter an amount to deposit.");
+  }
+  return Promise.all(
+    funded.map(async (e) => ({
+      label: e.label,
+      ixs: (
+        await buildAddLiquidityIxs({
+          market: e.market,
+          marketAccount: e.marketAccount,
+          reserves: e.reserves,
+          contributor: args.contributor,
+          amount: e.amount,
+          slippageBps: args.slippageBps,
+        })
+      ).ixs,
       checkAccount: toAddress("Market", e.market),
       skipIfLanded: false,
     })),
