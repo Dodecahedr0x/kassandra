@@ -41,6 +41,16 @@ export function ClaimLpControl({
   // Nothing to claim (disconnected, not a contributor, or already claimed) → hide.
   if (!mine) return null;
 
+  // A contributor's claimable position is their Funding stake (`amount` KASS, which
+  // earned LP pro-rata at activation) and/or the liquidity they added post-activation
+  // (`lateLp`, recorded as LP with `amount == 0`). Describe whichever they hold — a
+  // pure late LP must NOT read as a "0 KASS contribution".
+  const c = mine.contribution;
+  const parts: string[] = [];
+  if (c.amount > 0n) parts.push(`${formatKass(c.amount)} KASS funding contribution`);
+  if (c.lateLp > 0n) parts.push(`${formatKass(c.lateLp)} LP you added to the pool`);
+  const positionText = parts.length > 0 ? parts.join(" and ") : "position";
+
   // Fee gate: claim_lp opens only after the protocol fee is collected. Until then
   // (Active, or Resolved/Void awaiting the crank) show a disabled waiting state.
   if (!market.feeCollected) {
@@ -49,9 +59,8 @@ export function ClaimLpControl({
         <div>
           <h3 className="font-serif text-subheading font-light text-sepia">Claim LP tokens</h3>
           <p className="mt-1 font-inter text-[13px] text-driftwood">
-            Your {formatKass(mine.contribution.amount)} KASS contribution earned a pro-rata share of
-            the pool's LP tokens. Claims open once the market resolves and its protocol fee is
-            collected.
+            Your {positionText} is claimable as a share of the pool's LP tokens. Claims open once the
+            market resolves and its protocol fee is collected.
           </p>
         </div>
         <SubmitButton verb="Waiting for fee collection" status={{ kind: "idle" }} disabled />
@@ -76,8 +85,8 @@ export function ClaimLpControl({
       <div>
         <h3 className="font-serif text-subheading font-light text-sepia">Claim LP tokens</h3>
         <p className="mt-1 font-inter text-[13px] text-driftwood">
-          Your {formatKass(mine.contribution.amount)} KASS contribution earned a pro-rata share of
-          the pool's LP tokens at activation. Claim them to your wallet.
+          Your {positionText} is claimable as a share of the pool's LP tokens. Claim them to your
+          wallet.
         </p>
       </div>
       <form className="flex flex-col gap-3" onSubmit={onSubmit} noValidate>
