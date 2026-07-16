@@ -41,7 +41,7 @@
   --color-sepia: #ffffff; /* headings -> platinum */
   --color-bronze: #c7d3d2; /* secondary text -> silver-mist (lifted for the lighter canvas) */
   --color-driftwood: #c7d3d2; /* muted body -> silver-mist */
-  --color-stone: #9bb0ad; /* lighter muted -> teal-gray */
+  --color-stone: #b3c6c3; /* lowest-emphasis text — lifted to clear AA 4.5:1 on kelp cards while staying dimmer than driftwood */
   --color-pebble: rgba(255, 255, 255, 0.12); /* hairline borders on dark */
   --color-chestnut: #8fe9dd; /* positive/confirmed/active accent -> bright aqua (success lines, confirmed chips, active toggles, current step). MUST stay distinct from the kelp card surface. */
   --color-ember-orange: #ff6f61; /* error/danger signal -> living coral (alerts, invalid inputs, disqualify verdicts, high-impact warnings) */
