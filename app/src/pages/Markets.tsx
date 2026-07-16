@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Button, Card, SectionHeader } from "../components/ui";
 import { MarketCard } from "../components/markets/MarketCard";
 import { CategoricalCard } from "../components/markets/CategoricalCard";
+import { useInitialReveal } from "../hooks/useInitialReveal";
 import { useMarkets } from "../market/hooks/useMarkets";
 import { useConfig } from "../market/hooks/useMarketDetail";
 import { groupByOracle, isCategorical, type MarketSummary } from "../market/data/markets";
@@ -67,6 +68,8 @@ function SkeletonCard() {
 
 export default function Markets() {
   const { data, loading, error, refetch } = useMarkets();
+  // Stagger the grid in only on the first data render (not on filter/sort/poll).
+  const stagger = useInitialReveal(!loading && (data?.length ?? 0) > 0);
   const config = useConfig();
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("tvl");
@@ -177,15 +180,28 @@ export default function Markets() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {groups.map((group) =>
-              isCategorical(group) ? (
-                <CategoricalCard key={group.oracle} group={group} />
-              ) : (
-                group.markets.map((summary) => (
-                  <MarketCard key={summary.pubkey} summary={summary} />
-                ))
-              ),
-            )}
+            {(() => {
+              // Running flat index across the (nested) grouped output, so the
+              // first-load stagger cascades in visual order.
+              let i = 0;
+              return groups.map((group) =>
+                isCategorical(group) ? (
+                  <CategoricalCard
+                    key={group.oracle}
+                    group={group}
+                    enterIndex={stagger ? i++ : undefined}
+                  />
+                ) : (
+                  group.markets.map((summary) => (
+                    <MarketCard
+                      key={summary.pubkey}
+                      summary={summary}
+                      enterIndex={stagger ? i++ : undefined}
+                    />
+                  ))
+                ),
+              );
+            })()}
           </div>
         )}
       </div>

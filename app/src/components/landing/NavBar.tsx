@@ -254,7 +254,7 @@ export default function NavBar() {
       {/* Mobile menu panel — drops beneath the bar; since the nav is sticky it
           floats over the page content on the same glass material. */}
       {open ? (
-        <div id="mobile-nav-menu" className="border-t border-pebble md:hidden">
+        <div id="mobile-nav-menu" className="mobile-menu-enter border-t border-pebble md:hidden">
           <ul className="flex flex-col px-6 py-1">
             {NAV_LINKS.map((l) => {
               const active = isActiveLink(l, location.pathname)

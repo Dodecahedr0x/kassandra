@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { MarketStatus } from "@kassandra-market/markets";
 import { Card } from "../ui";
@@ -16,13 +17,28 @@ const focusRing =
  * and linking to that sub-market's detail. There are no on-chain labels, so each
  * outcome reads as "Outcome i".
  */
-export function CategoricalCard({ group }: { group: OracleGroup }) {
+export function CategoricalCard({
+  group,
+  enterIndex,
+}: {
+  group: OracleGroup;
+  /** First-load stagger index (undefined = no entrance animation). */
+  enterIndex?: number;
+}) {
   const outcomes = group.markets.map((summary) => outcomeRow(summary));
   const optionsCount = group.optionsCount ?? group.markets.length;
   const tvl = group.markets.reduce((sum, m) => sum + m.market.totalContributed, 0n);
+  const stagger = enterIndex !== undefined;
 
   return (
-    <Card className="flex h-full flex-col gap-3">
+    <Card
+      className={`flex h-full flex-col gap-3${stagger ? " stagger-in" : ""}`}
+      style={
+        stagger
+          ? ({ "--stagger-delay": `${Math.min(enterIndex, 10) * 40}ms` } as CSSProperties)
+          : undefined
+      }
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center rounded-tag border border-pebble bg-soft-cream px-2.5 py-1 font-inter text-[12px] font-medium text-bronze">
           Categorical · {optionsCount} outcomes

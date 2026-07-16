@@ -387,3 +387,79 @@
     backdrop-filter: none;
   }
 }
+
+/*
+ * First-load grid stagger — the browse cards fade + rise in, one after another,
+ * ONLY on the first data render (the page gates it with useInitialReveal, so
+ * filter/sort re-renders never re-animate). Per-card offset via --stagger-delay.
+ */
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes stagger-fade {
+  from {
+    opacity: 0;
+  }
+}
+.stagger-in {
+  animation: stagger-in 0.34s var(--ease-out) both;
+  animation-delay: var(--stagger-delay, 0ms);
+  will-change: transform, opacity;
+}
+
+/*
+ * Status + menu entrances — transition-based (@starting-style), so they can be
+ * interrupted/retargeted rather than locked keyframes. Status lines materialize
+ * (fade + rise + un-blur) as the write phase changes; the mobile menu drops from
+ * the bar edge.
+ */
+.status-enter {
+  transition:
+    opacity 160ms var(--ease-out),
+    transform 160ms var(--ease-out),
+    filter 160ms var(--ease-out);
+}
+@starting-style {
+  .status-enter {
+    opacity: 0;
+    transform: translateY(2px);
+    filter: blur(3px);
+  }
+  /* Success gets a touch more presence (scale in) — the confirmed-tx beat. */
+  .status-enter-success {
+    opacity: 0;
+    transform: scale(0.97);
+    filter: blur(3px);
+  }
+}
+.mobile-menu-enter {
+  transition:
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
+}
+@starting-style {
+  .mobile-menu-enter {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Gentler equivalents: opacity only, no movement / no stagger. */
+  .stagger-in {
+    animation-name: stagger-fade;
+    animation-delay: 0ms !important;
+  }
+  .status-enter,
+  .status-enter-success,
+  .mobile-menu-enter {
+    transition: opacity 160ms ease !important;
+  }
+}

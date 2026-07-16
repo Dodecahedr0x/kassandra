@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { MarketStatus } from "@kassandra-market/markets";
 import { Card } from "../ui";
@@ -16,13 +17,29 @@ const focusRing =
  * so the title is the market's short pubkey; the body shows a funding bar
  * (Funding) or the live YES probability (Active), plus TVL (totalContributed).
  */
-export function MarketCard({ summary }: { summary: MarketSummary }) {
+export function MarketCard({
+  summary,
+  enterIndex,
+}: {
+  summary: MarketSummary;
+  /** First-load stagger index (undefined = no entrance animation). */
+  enterIndex?: number;
+}) {
   const { pubkey, market, reserves } = summary;
   const isFunding = market.status === MarketStatus.Funding;
   const isActive = market.status === MarketStatus.Active;
+  const stagger = enterIndex !== undefined;
 
   return (
-    <Link to={`/markets/${pubkey}`} className={`group block rounded-card ${focusRing}`}>
+    <Link
+      to={`/markets/${pubkey}`}
+      className={`group block rounded-card ${focusRing}${stagger ? " stagger-in" : ""}`}
+      style={
+        stagger
+          ? ({ "--stagger-delay": `${Math.min(enterIndex, 10) * 40}ms` } as CSSProperties)
+          : undefined
+      }
+    >
       <Card className="flex h-full flex-col gap-3 transition-[transform,border-color] duration-200 ease-out group-hover:-translate-y-0.5 group-hover:border-cyan-phosphor/40 group-active:scale-[0.99] motion-reduce:group-hover:translate-y-0">
         <div className="flex items-center justify-between gap-2">
           <StatusChip status={market.status} />

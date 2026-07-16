@@ -28,14 +28,14 @@ export function WriteStatusRegion({
   return (
     <div aria-live="polite" className="min-h-[1.25rem]">
       {status.kind === 'building' || status.kind === 'signing' || status.kind === 'confirming' ? (
-        <p className="font-inter text-[13px] text-bronze">{BUSY_LABEL[status.kind]}</p>
+        <p className="status-enter font-inter text-[13px] text-bronze">{BUSY_LABEL[status.kind]}</p>
       ) : null}
 
       {status.kind === 'success'
         ? (() => {
             const url = explorerTxUrl(cluster, status.signature)
             return (
-              <p className="font-inter text-[13px] text-chestnut">
+              <p className="status-enter status-enter-success font-inter text-[13px] text-chestnut">
                 {successVerb} · <span className="font-mono">{shortSig(status.signature)}</span>
                 {url ? (
                   <>
@@ -56,7 +56,7 @@ export function WriteStatusRegion({
         : null}
 
       {status.kind === 'error' ? (
-        <div className="rounded-tag border border-ember-orange/40 bg-ember-orange/10 px-3 py-2">
+        <div className="status-enter rounded-tag border border-ember-orange/40 bg-ember-orange/10 px-3 py-2">
           <p className="font-inter text-[13px] text-ember-orange">{status.message}</p>
           {status.logs && status.logs.length > 0 ? (
             <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-bronze">
