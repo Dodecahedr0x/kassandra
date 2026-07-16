@@ -46,6 +46,14 @@ export interface ActivateStep {
    * (re)send rather than re-running the non-idempotent instruction.
    */
   checkAccount: Address;
+  /**
+   * Whether the sender may skip this step when {@link checkAccount} already exists
+   * (default `true`). Steps whose instruction is idempotent-by-creation (create,
+   * activate) leave it unset. Set `false` for steps that LEGITIMATELY repeat
+   * against an existing account — e.g. `contribute` adds to an existing
+   * Contribution — so the sender never wrongly skips a real deposit/withdraw.
+   */
+  skipIfLanded?: boolean;
 }
 
 export interface BuildActivateArgs {

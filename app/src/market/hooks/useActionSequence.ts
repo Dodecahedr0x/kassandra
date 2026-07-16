@@ -97,8 +97,9 @@ export function useActionSequence(onDone?: () => void): ActionSequence {
         });
         // Skip a step whose non-idempotent instruction already landed (e.g. a
         // prior attempt's confirm timed out after the tx actually succeeded);
-        // re-sending it would revert "already in use".
-        if (await stepAlreadyLanded(indexer, steps[i])) {
+        // re-sending it would revert "already in use". Steps that legitimately
+        // repeat against an existing account opt out with `skipIfLanded: false`.
+        if (steps[i].skipIfLanded !== false && (await stepAlreadyLanded(indexer, steps[i]))) {
           setStatuses((prev) => {
             const next = [...prev];
             next[i] = { kind: "done", signature: "already-landed" };

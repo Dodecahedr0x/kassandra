@@ -8,6 +8,7 @@ import { ProbabilityBar } from "../components/markets/ProbabilityBar";
 import { Truncated } from "../components/markets/Truncated";
 import { TradePanel } from "../components/markets/actions/TradePanel";
 import { MarketActions } from "../components/markets/actions/MarketActions";
+import { GroupLiquidityPanel } from "../components/markets/actions/GroupLiquidityPanel";
 import { useMarketDetail } from "../market/hooks/useMarketDetail";
 import { MarketNotFoundError, type MarketDetail as MarketDetailData } from "../market/data/markets";
 import { explorerAddressUrl } from "../market/lib/explorer";
@@ -250,6 +251,11 @@ function DetailBody({
           </ul>
         )}
       </Panel>
+
+      {/* Bulk liquidity across this oracle's whole GROUP of outcome sub-markets —
+          self-hides for a lone (binary) market. Sits above the single-market
+          actions so "fund/withdraw all outcomes" is the primary affordance. */}
+      <GroupLiquidityPanel oracle={market.oracle.toString()} />
 
       {/* Status-gated write actions: contribute (Funding), and the redeem/claim/
           close/resolve cranks (Active + terminal). The Active buy/sell TradePanel
