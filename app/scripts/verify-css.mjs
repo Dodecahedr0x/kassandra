@@ -28,8 +28,8 @@ if (/@tailwind\s+utilities/.test(css)) problems.push('literal `@tailwind utiliti
 if (/@theme\s*\{/.test(css)) problems.push('literal `@theme{}` leaked (not lowered to :root)')
 
 // Real evidence the compile ran: theme var lowered + a couple of token utilities.
-if (!css.includes('--color-parchment')) problems.push('theme var `--color-parchment` not emitted')
-for (const util of ['.bg-chestnut', '.shadow-bloom', '.font-serif']) {
+if (!css.includes('--color-liquid-abyss')) problems.push('theme var `--color-liquid-abyss` not emitted')
+for (const util of ['.bg-aqua', '.shadow-bloom', '.font-serif']) {
   if (!css.includes(util)) problems.push(`utility \`${util}\` not generated`)
 }
 
