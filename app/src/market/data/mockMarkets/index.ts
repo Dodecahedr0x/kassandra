@@ -21,8 +21,8 @@ export async function mockMarketDetail(pubkey: string): Promise<MarketDetailDto 
 }
 
 /** Mock of `IndexerClient.getCandles` — a deterministic synthetic OHLC series. */
-export async function mockCandles(pubkey: string, intervalSecs: number, limit: number): Promise<CandleDto[]> {
-  return mockCandlesFor(pubkey, intervalSecs, limit);
+export async function mockCandles(pubkey: string, intervalSecs: number, limit: number, nowSecs?: number): Promise<CandleDto[]> {
+  return mockCandlesFor(pubkey, intervalSecs, limit, nowSecs);
 }
 
 /** Mock of `IndexerClient.getConfig` — the fixture `Config` singleton. */

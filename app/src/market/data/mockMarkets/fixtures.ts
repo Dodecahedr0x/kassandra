@@ -417,11 +417,21 @@ const CANDLE_EPOCH = 1_700_000_000;
 /**
  * A deterministic synthetic OHLC series of implied YES probability, mean-
  * reverting around 0.5. Same `(pubkey, intervalSecs, limit)` always produces the
- * same candles — seeded by a hash of the inputs, not the wall clock or
+ * same candles' VALUES — seeded by a hash of the inputs, not the wall clock or
  * `Math.random`. `limit` candles spaced `intervalSecs` apart, oldest first.
+ *
+ * Timestamps are anchored to `nowSecs` when given: the last candle lands on the
+ * `intervalSecs`-aligned bucket at/before `nowSecs`, walking backwards `limit`
+ * candles from there. When `nowSecs` is omitted, timestamps fall back to the
+ * fixed, non-wall-clock `CANDLE_EPOCH` anchor so callers that need fully
+ * reproducible output (e.g. unit tests) keep getting it. Either way the OHLC
+ * values themselves are the same deterministic random walk — only the time
+ * axis moves.
  */
-export function mockCandlesFor(pubkey: string, intervalSecs: number, limit: number): CandleDto[] {
+export function mockCandlesFor(pubkey: string, intervalSecs: number, limit: number, nowSecs?: number): CandleDto[] {
   const rand = mulberry32(fnv1a(`${pubkey}:${intervalSecs}`));
+  const lastBucket = nowSecs === undefined ? CANDLE_EPOCH + (limit - 1) * intervalSecs : Math.floor(nowSecs / intervalSecs) * intervalSecs;
+  const startBucket = lastBucket - (limit - 1) * intervalSecs;
   const candles: CandleDto[] = [];
   let price = 0.5;
   for (let i = 0; i < limit; i++) {
@@ -432,7 +442,7 @@ export function mockCandlesFor(pubkey: string, intervalSecs: number, limit: numb
     const wickDown = rand() * 0.01;
     const high = Math.min(0.99, Math.max(open, close) + wickUp);
     const low = Math.max(0.01, Math.min(open, close) - wickDown);
-    candles.push({ time: CANDLE_EPOCH + i * intervalSecs, open, high, low, close });
+    candles.push({ time: startBucket + i * intervalSecs, open, high, low, close });
     price = close;
   }
   return candles;

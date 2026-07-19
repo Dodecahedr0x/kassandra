@@ -80,6 +80,24 @@ describe("mockMarkets fixtures", () => {
     }
   });
 
+  it("mockCandles anchors the last candle near a supplied nowSecs, keeping values deterministic", async () => {
+    const intervalSecs = 3600;
+    const nowSecs = Math.floor(Date.now() / 1000);
+    const a = await mockCandles(MOCK_MARKET_PUBKEYS[0], intervalSecs, 50, nowSecs);
+    const b = await mockCandles(MOCK_MARKET_PUBKEYS[0], intervalSecs, 50, nowSecs);
+    // Same nowSecs -> same series (values still come from the seeded random walk).
+    expect(a).toEqual(b);
+    const last = a[a.length - 1];
+    expect(last.time).toBeLessThanOrEqual(nowSecs);
+    expect(nowSecs - last.time).toBeLessThan(intervalSecs);
+    // The OHLC *values* match the fixed-epoch call (same seed, same walk) — only
+    // the time axis moved.
+    const fixed = await mockCandles(MOCK_MARKET_PUBKEYS[0], intervalSecs, 50);
+    expect(a.map((c) => ({ open: c.open, high: c.high, low: c.low, close: c.close }))).toEqual(
+      fixed.map((c) => ({ open: c.open, high: c.high, low: c.low, close: c.close })),
+    );
+  });
+
   it("mockConfig round-trips through mapConfigDto", async () => {
     const dto = await mockConfig();
     expect(() => mapConfigDto(dto)).not.toThrow();

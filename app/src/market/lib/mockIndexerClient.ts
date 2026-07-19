@@ -32,9 +32,14 @@ export class MockIndexerClient implements IndexerReads {
     return mockMarketDetail(pubkey);
   }
 
-  /** Mirrors `IndexerClient.getCandles` — a deterministic synthetic OHLC series. */
+  /**
+   * Mirrors `IndexerClient.getCandles` — a deterministic synthetic OHLC series.
+   * Anchored to real wall-clock "now" (this is the live runtime bridge, not a
+   * snapshotted script) so the series lines up with `PriceChart`'s wall-clock
+   * visible window instead of sitting at a fixed historical epoch.
+   */
   async getCandles(pubkey: string, intervalSecs: number, limit = 300): Promise<CandleDto[]> {
-    return mockCandles(pubkey, intervalSecs, limit);
+    return mockCandles(pubkey, intervalSecs, limit, Math.floor(Date.now() / 1000));
   }
 
   /** No raw account reads in mock mode — always resolves to `null`. */
