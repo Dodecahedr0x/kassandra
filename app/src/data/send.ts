@@ -13,7 +13,7 @@
  * (carrying the signature + any program logs) the caller can render.
  */
 import { Connection, Keypair, Transaction, type TransactionInstruction } from "@solana/web3.js";
-import { confirmSignature } from "@kassandra-market/oracles";
+import { confirmSignature, decodeError, KASSANDRA_PROGRAM_ID } from "@kassandra-market/oracles";
 
 /**
  * The signer-abstraction seam: given the instruction list, sign + submit a
@@ -56,9 +56,44 @@ function extractLogs(e: unknown): string[] | undefined {
 }
 
 /**
+ * Turn a Kassandra `Custom(<code>)` program error into its human message (via
+ * `decodeError`), or `undefined` when the failure isn't OUR program's error (a
+ * MetaDAO / SPL / other-program `Custom` code won't decode — the caller falls
+ * back to the raw text).
+ *
+ * To avoid mis-attributing another program's `Custom(N)` (small codes collide
+ * across programs), this PREFERS a program-scoped log line — `Program
+ * <KASSANDRA_PROGRAM_ID> failed: custom program error: 0xN` — and only falls
+ * back to a bare `"Custom":N` from the status-error JSON (the confirm path,
+ * where `getSignatureStatuses` gives no logs — see `confirmSignature`).
+ */
+export function humanizeProgramError(text: string, logs?: string[]): string | undefined {
+  const program = KASSANDRA_PROGRAM_ID.toString();
+  let code: number | undefined;
+
+  const scoped = (logs ?? []).find(
+    (l) => l.includes(program) && /custom program error:\s*0x[0-9a-fA-F]+/i.test(l),
+  );
+  if (scoped) {
+    const h = /custom program error:\s*0x([0-9a-fA-F]+)/i.exec(scoped);
+    if (h) code = parseInt(h[1], 16);
+  }
+  if (code === undefined) {
+    const j = /"Custom"\s*:\s*(\d+)/.exec(text);
+    if (j) code = Number(j[1]);
+  }
+  if (code === undefined) return undefined;
+
+  const { name, message } = decodeError(code);
+  return name === "Unknown" ? undefined : message;
+}
+
+/**
  * Send `ixs` via `sender`, then confirm the resulting signature over
  * `connection`. Throws a {@link SendError} (with the signature + logs when
- * available) if the send throws or the tx fails / never confirms.
+ * available) if the send throws or the tx fails / never confirms — the
+ * message is a decoded {@link humanizeProgramError} when the failure is a
+ * recognized Kassandra custom error, else the raw error text.
  */
 export async function sendAndConfirm(
   connection: Connection,
@@ -69,19 +104,24 @@ export async function sendAndConfirm(
   try {
     signature = await sender(ixs);
   } catch (e) {
-    throw new SendError(`Transaction send failed: ${errMsg(e)}`, {
-      logs: extractLogs(e),
+    const logs = extractLogs(e);
+    const human = humanizeProgramError(errMsg(e), logs);
+    throw new SendError(human ? `Transaction failed: ${human}` : `Transaction send failed: ${errMsg(e)}`, {
+      logs,
       cause: e,
     });
   }
   try {
     await confirmSignature(connection, signature);
   } catch (e) {
-    throw new SendError(`Transaction ${signature} failed to confirm: ${errMsg(e)}`, {
-      signature,
-      logs: extractLogs(e),
-      cause: e,
-    });
+    const logs = extractLogs(e);
+    const human = humanizeProgramError(errMsg(e), logs);
+    throw new SendError(
+      human
+        ? `Transaction ${signature} failed: ${human}`
+        : `Transaction ${signature} failed to confirm: ${errMsg(e)}`,
+      { signature, logs, cause: e },
+    );
   }
   return { signature };
 }

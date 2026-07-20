@@ -79,7 +79,7 @@ export enum MarketStatus {
 
 /**
  * Program error codes surfaced to clients as `ProgramError::Custom(u32)`.
- * Mirror of `MarketError` in `error.rs` (0..=21). STABLE PUBLIC CONTRACT.
+ * Mirror of `MarketError` in `error.rs` (0..=22). STABLE PUBLIC CONTRACT.
  */
 export enum MarketError {
   InvalidAccount = 0,
@@ -104,6 +104,8 @@ export enum MarketError {
   InvalidOutcome = 19,
   ContributionsOpen = 20,
   NotSettled = 21,
+  /** `init_config` caller is not the program's on-chain upgrade authority. */
+  NotUpgradeAuthority = 22,
 }
 
 /** Governance guardrail: max protocol `fee_bps` (10% = 1000 bps). Mirror of `state::MAX_FEE_BPS`. */
@@ -138,6 +140,8 @@ export const MARKET_ERROR_MESSAGES: Record<MarketError, string> = {
     "The market still has open contributions (some contributor has not yet claimed/refunded); it cannot be closed until every contribution is exited.",
   [MarketError.NotSettled]:
     "The market is not in a terminal (Resolved/Void/Cancelled) status, so it cannot be closed.",
+  [MarketError.NotUpgradeAuthority]:
+    "The signer is not the program's on-chain upgrade authority.",
 };
 
 /**

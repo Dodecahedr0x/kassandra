@@ -100,8 +100,9 @@ describe('runWriteAction — error mapping', () => {
     expect(kinds(seen)).toEqual(['building', 'signing', 'error'])
   })
 
-  it('surfaces a failed confirmation (tx err) after confirming', async () => {
+  it('decodes a known custom error on a failed confirmation into a human message', async () => {
     const seen: WriteStatus[] = []
+    // Custom(1) == KassandraError.WrongPhase.
     const final = await runWriteAction({
       build: noIxs,
       connection: mockConnection({ confirmErr: { InstructionError: [0, { Custom: 1 }] } }),
@@ -109,6 +110,21 @@ describe('runWriteAction — error mapping', () => {
       setStatus: (s) => seen.push(s),
     })
     expect(kinds(seen)).toEqual(['building', 'signing', 'confirming', 'error'])
+    expect(final.kind).toBe('error')
+    if (final.kind === 'error') {
+      expect(final.message).toContain('SIG_BAD')
+      expect(final.message).toContain('not in the phase this instruction requires')
+    }
+  })
+
+  it('falls back to the raw confirm error for an unrecognized custom code', async () => {
+    const seen: WriteStatus[] = []
+    const final = await runWriteAction({
+      build: noIxs,
+      connection: mockConnection({ confirmErr: { InstructionError: [0, { Custom: 9999 }] } }),
+      walletSender: async () => 'SIG_BAD',
+      setStatus: (s) => seen.push(s),
+    })
     expect(final.kind).toBe('error')
     if (final.kind === 'error') expect(final.message).toContain('failed to confirm')
   })

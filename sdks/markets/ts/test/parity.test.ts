@@ -100,7 +100,7 @@ describe("parity guard: account sizes (tests/state_layout.rs)", () => {
   });
 });
 
-describe("parity guard: MarketError (error.rs 0..=21)", () => {
+describe("parity guard: MarketError (error.rs 0..=22)", () => {
   // Pinned from programs/markets/src/error.rs.
   const PINNED: Record<string, number> = {
     InvalidAccount: 0,
@@ -125,6 +125,7 @@ describe("parity guard: MarketError (error.rs 0..=21)", () => {
     InvalidOutcome: 19,
     ContributionsOpen: 20,
     NotSettled: 21,
+    NotUpgradeAuthority: 22,
   };
 
   it("matches every MarketError by name and value", () => {
@@ -133,9 +134,9 @@ describe("parity guard: MarketError (error.rs 0..=21)", () => {
     }
   });
 
-  it("has exactly 22 errors (0..=21)", () => {
+  it("has exactly 23 errors (0..=22)", () => {
     const numericValues = Object.values(MarketError).filter((v) => typeof v === "number");
-    expect(numericValues.length).toBe(22);
+    expect(numericValues.length).toBe(23);
   });
 
   it("decodeError round-trips known codes", () => {
