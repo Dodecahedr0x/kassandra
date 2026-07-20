@@ -7,25 +7,15 @@
  * move), so the live YES probability + reserves refresh without a websocket.
  * Settled/funding markets don't poll.
  */
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { MarketStatus } from "@kassandra-market/markets";
 import { useIndexer } from "../lib/indexer";
 import { fetchConfig, fetchMarketDetail, type MarketDetail } from "../data/markets";
-import { useAsync, type AsyncState } from "./useAsync";
+import { useAsync, useRefetchAfterWrite, type AsyncState } from "./useAsync";
 import type { Config } from "@kassandra-market/markets";
 
 /** Poll interval (ms) while a live, Active market is on screen. */
 const POLL_MS = 15_000;
-
-/**
- * Post-write refetch schedule (ms after an action confirms). The indexer's
- * account store trails the chain by up to its reconcile interval — and there is a
- * brief window between a tx confirming and the store reflecting it — so a SINGLE
- * refetch right after an action can read stale state (e.g. a just-activated market
- * still reading `Funding`), leaving the UI stuck until a manual reload. This short
- * burst reliably catches the update within a few seconds regardless of that lag.
- */
-const AFTER_WRITE_MS = [0, 800, 1800, 3500];
 
 export interface MarketDetailState extends AsyncState<MarketDetail> {
   /** Refetch resilient to indexer reconcile lag — use as an action's onSuccess. */
@@ -51,13 +41,7 @@ export function useMarketDetail(pubkey: string | undefined): MarketDetailState {
     return () => clearInterval(timer);
   }, [active, refetch]);
 
-  // Burst of refetches after a write, cleared on unmount.
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
-  const refetchAfterWrite = useCallback(() => {
-    timers.current.forEach(clearTimeout);
-    timers.current = AFTER_WRITE_MS.map((ms) => setTimeout(refetch, ms));
-  }, [refetch]);
+  const refetchAfterWrite = useRefetchAfterWrite(refetch);
 
   return { ...state, refetchAfterWrite };
 }

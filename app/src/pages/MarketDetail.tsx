@@ -383,7 +383,7 @@ function DetailBody({
           <div className="border-t border-hairline pt-5">
             <MarketLiquidityActions detail={detail} refetch={refetch} />
           </div>
-          <GroupLiquidityPanel oracle={market.oracle.toString()} embedded />
+          <GroupLiquidityPanel oracle={market.oracle.toString()} embedded onSuccess={refetch} />
         </Panel>
 
         <Panel title="Pool composition & contributions">

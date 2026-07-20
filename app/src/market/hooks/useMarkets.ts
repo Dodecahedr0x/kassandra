@@ -5,12 +5,19 @@
  */
 import { useIndexer } from "../lib/indexer";
 import { fetchMarkets, type MarketSummary } from "../data/markets";
-import { useAsync, type AsyncState } from "./useAsync";
+import { useAsync, useRefetchAfterWrite, type AsyncState } from "./useAsync";
+
+export interface MarketsState extends AsyncState<MarketSummary[]> {
+  /** Refetch resilient to indexer/RPC propagation lag — use as a write action's onSuccess. */
+  refetchAfterWrite: () => void;
+}
 
 /** The market list: every mapped {@link MarketSummary}, most-funded first. */
-export function useMarkets(): AsyncState<MarketSummary[]> {
+export function useMarkets(): MarketsState {
   const indexer = useIndexer();
-  return useAsync(() => fetchMarkets(indexer), [indexer]);
+  const state = useAsync(() => fetchMarkets(indexer), [indexer]);
+  const refetchAfterWrite = useRefetchAfterWrite(state.refetch);
+  return { ...state, refetchAfterWrite };
 }
 
 export default useMarkets;

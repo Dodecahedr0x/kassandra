@@ -4,24 +4,47 @@
  * oracle) or a lone market, and we assert (via `renderToStaticMarkup`):
  *   - a group renders the "Group liquidity" panel + the uniform-split deposit UI;
  *   - a lone market renders NOTHING (self-hides — it uses the single-market form);
- *   - the deposit affordance targets exactly the funding outcomes.
+ *   - the deposit affordance targets exactly the funding outcomes;
+ *   - a deposit/withdraw's completion refetches the group's OWN market list, the
+ *     KASS balance, AND the parent market-detail page — not just the balance
+ *     (regression coverage for the missing-refetch bug: a bulk deposit used to
+ *     leave both this panel's reserves and the page's pool value/price impact
+ *     stuck on pre-deposit data).
  */
 import { vi } from "vitest";
 
 // Mutable data the mocked useMarkets returns (set per test).
 const state = vi.hoisted(() => ({ siblings: [] as unknown[] }));
+// The `useActionSequence` mock captures its `onDone` callback here so tests can
+// invoke it directly and assert on the refetch spies below — the mock's `run`
+// never actually calls it (no real async sequence executes under SSR).
+const captured = vi.hoisted(() => ({ onDone: undefined as (() => void) | undefined }));
+const spies = vi.hoisted(() => ({
+  refetchMarkets: vi.fn(),
+  refetchBalance: vi.fn(),
+  onSuccess: vi.fn(),
+}));
 
 vi.mock("../src/market/hooks/useMarkets", () => ({
-  useMarkets: () => ({ data: state.siblings, loading: false, error: undefined, refetch: () => {} }),
+  useMarkets: () => ({
+    data: state.siblings,
+    loading: false,
+    error: undefined,
+    refetch: () => {},
+    refetchAfterWrite: spies.refetchMarkets,
+  }),
 }));
 vi.mock("../src/market/hooks/useMarketDetail", () => ({
   useConfig: () => ({ data: { kassMint: { toString: () => "Kass1111111111111111111111111111111111111111" } }, loading: false, error: undefined, refetch: () => {} }),
 }));
 vi.mock("../src/market/hooks/useKassBalance", () => ({
-  useKassBalance: () => ({ balance: 1_000_000_000_000n, loading: false, refetch: () => {} }),
+  useKassBalance: () => ({ balance: 1_000_000_000_000n, loading: false, refetch: spies.refetchBalance }),
 }));
 vi.mock("../src/market/hooks/useActionSequence", () => ({
-  useActionSequence: () => ({ statuses: [], busy: false, connected: true, address: "Wa11et11111111111111111111111111111111111111", allDone: false, run: async () => {}, reset: () => {} }),
+  useActionSequence: (onDone?: () => void) => {
+    captured.onDone = onDone;
+    return { statuses: [], busy: false, connected: true, address: "Wa11et11111111111111111111111111111111111111", allDone: false, run: async () => {}, reset: () => {} };
+  },
 }));
 vi.mock("../src/market/lib/indexer", () => ({ useIndexer: () => ({}) }));
 vi.mock("../src/components/markets/actions/ConnectGate", () => ({
@@ -58,8 +81,8 @@ function summary(
   } as unknown;
 }
 
-function render(): string {
-  return renderToStaticMarkup(<GroupLiquidityPanel oracle={ORACLE} />);
+function render(onSuccess?: () => void): string {
+  return renderToStaticMarkup(<GroupLiquidityPanel oracle={ORACLE} onSuccess={onSuccess} />);
 }
 
 describe("GroupLiquidityPanel", () => {
@@ -122,5 +145,28 @@ describe("GroupLiquidityPanel", () => {
     ];
     const html = render();
     expect(html).toContain("Withdraw from 2 outcomes");
+  });
+
+  it("a completed deposit/withdraw sequence refetches its OWN market list, the KASS balance, AND the parent page — not just the balance", () => {
+    state.siblings = [summary(0, MarketStatus.Funding), summary(1, MarketStatus.Funding)];
+    spies.refetchMarkets.mockClear();
+    spies.refetchBalance.mockClear();
+    spies.onSuccess.mockClear();
+    render(spies.onSuccess);
+    expect(captured.onDone).toBeTypeOf("function");
+    captured.onDone!();
+    expect(spies.refetchBalance).toHaveBeenCalledTimes(1);
+    expect(spies.refetchMarkets).toHaveBeenCalledTimes(1);
+    expect(spies.onSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("tolerates a missing onSuccess (standalone, non-embedded usage)", () => {
+    state.siblings = [summary(0, MarketStatus.Funding), summary(1, MarketStatus.Funding)];
+    spies.refetchMarkets.mockClear();
+    spies.refetchBalance.mockClear();
+    render(); // no onSuccess
+    expect(() => captured.onDone!()).not.toThrow();
+    expect(spies.refetchBalance).toHaveBeenCalledTimes(1);
+    expect(spies.refetchMarkets).toHaveBeenCalledTimes(1);
   });
 });

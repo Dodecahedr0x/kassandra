@@ -35,16 +35,20 @@ import { BatchStepList } from "./CreateMarketForm/BatchStepList";
 export function GroupLiquidityPanel({
   oracle,
   embedded = false,
+  onSuccess,
 }: {
   oracle: string;
   /** Render as a bare subsection (no Card wrapper) — for folding into another panel. */
   embedded?: boolean;
+  /** Called after a deposit/withdraw sequence completes — the parent market-detail
+   *  page's `refetchAfterWrite`, so its pool value / price impact also refreshes. */
+  onSuccess?: () => void;
 }) {
   const indexer = useIndexer();
   const config = useConfig();
   const kassMint = config.data ? config.data.kassMint.toString() : undefined;
   const { balance, loading: balanceLoading, refetch: refetchBalance } = useKassBalance(kassMint);
-  const { data: allMarkets } = useMarkets();
+  const { data: allMarkets, refetchAfterWrite: refetchMarkets } = useMarkets();
 
   // The group = every sub-market on this oracle, in outcome order.
   const siblings = useMemo<MarketSummary[]>(
@@ -83,8 +87,16 @@ export function GroupLiquidityPanel({
   const [error, setError] = useState<string | undefined>();
   const [steps, setSteps] = useState<ActivateStep[]>([]);
 
+  // A deposit/withdraw changes both the group's own AMM reserves/LP state (this
+  // panel's `siblings`, sourced from `useMarkets`) and — for the market whose
+  // detail page this panel is embedded in — the pool value + price impact shown
+  // above it, sourced from a SEPARATE `useMarketDetail` fetch. Refetching only the
+  // KASS balance left both of those stuck on pre-deposit reserves until the next
+  // 15s poll or a manual reload.
   const seq = useActionSequence(() => {
     refetchBalance();
+    refetchMarkets();
+    onSuccess?.();
   });
 
   // Parse the total + its uniform per-outcome split across every depositable outcome.

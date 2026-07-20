@@ -9,6 +9,32 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+/**
+ * Post-write refetch schedule (ms after an action confirms). The indexer/RPC
+ * layer trails a just-confirmed write by up to a brief propagation window — so a
+ * SINGLE refetch right after an action can still read pre-write state (e.g. a
+ * just-deposited pool's reserves not reflecting the deposit yet), leaving the UI
+ * stuck until the next poll or a manual reload. This short burst reliably catches
+ * the update within a few seconds regardless of that lag.
+ */
+const AFTER_WRITE_MS = [0, 800, 1800, 3500];
+
+/**
+ * Wrap a plain {@link AsyncState.refetch} in a burst scheduler resilient to
+ * indexer/RPC propagation lag (see {@link AFTER_WRITE_MS}). Call the returned
+ * function from a write action's `onSuccess` instead of `refetch` directly —
+ * every query hook backing a page/panel that renders post-write state (reserves,
+ * balances, market lists, …) should expose this, not just plumb the raw refetch.
+ */
+export function useRefetchAfterWrite(refetch: () => void): () => void {
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  return useCallback(() => {
+    timers.current.forEach(clearTimeout);
+    timers.current = AFTER_WRITE_MS.map((ms) => setTimeout(refetch, ms));
+  }, [refetch]);
+}
+
 export interface AsyncState<T> {
   data: T | undefined;
   loading: boolean;
